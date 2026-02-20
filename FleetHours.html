@@ -1,0 +1,1150 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FleetHours</title>
+  <style>
+    :root {
+      /* Professional Light Theme */
+      --bg: #f3f4f6; 
+      --panel: #ffffff; 
+      --border: #e5e7eb;
+      --text: #111827; 
+      --muted: #6b7280; 
+      --accent: #2563eb; 
+      --danger: #dc2626;
+      --success: #16a34a;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      --sans: "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    
+    * { box-sizing: border-box; }
+    
+    body { 
+      margin: 0; 
+      font-family: var(--sans); 
+      background: var(--bg); 
+      color: var(--text);
+      line-height: 1.5;
+    }
+    
+    .wrap { 
+      max-width: 1200px; 
+      margin: 0 auto; 
+      padding: 24px 16px;
+    }
+    
+    .topbar { 
+      display: flex; 
+      gap: 16px; 
+      align-items: center; 
+      justify-content: space-between; 
+      flex-wrap: wrap; 
+      margin-bottom: 20px;
+    }
+    
+    h1 { 
+      font-size: 20px; 
+      margin: 0; 
+      font-weight: 600; 
+      letter-spacing: -0.01em;
+    }
+    
+    /* Layout */
+    .row { 
+      display: grid; 
+      grid-template-columns: 1fr 1fr; 
+      gap: 16px; 
+      align-items: stretch;
+      margin-bottom: 20px;
+    }
+    @media (max-width: 980px) { .row { grid-template-columns: 1fr; } }
+
+    .panel { 
+      background: var(--panel); 
+      border: 1px solid var(--border); 
+      border-radius: 8px; 
+      box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+      display: flex;
+      flex-direction: column;
+    }
+    
+    .hd { 
+      padding: 12px 16px; 
+      border-bottom: 1px solid var(--border); 
+      display: flex; 
+      gap: 10px; 
+      align-items: center; 
+      justify-content: space-between; 
+      flex-wrap: wrap;
+      background: #f9fafb;
+      border-radius: 8px 8px 0 0;
+    }
+    
+    .hd-title {
+      font-weight: 600;
+      color: var(--text);
+      font-size: 14px;
+    }
+
+    .bd { 
+      padding: 16px; 
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .muted { color: var(--muted); font-size: 13px; }
+    .mono { font-family: var(--mono); }
+    
+    /* Badges/Pills */
+    .pill { 
+      font-size: 12px; 
+      border: 1px solid var(--border); 
+      background: #f9fafb;
+      border-radius: 4px; 
+      padding: 2px 8px; 
+      color: var(--muted);
+      font-weight: 500;
+      font-family: var(--sans);
+    }
+    .pill.on { 
+      border-color: #bfdbfe; 
+      color: var(--accent);
+      background: #eff6ff;
+    }
+
+    /* Make the pill act as a button when needed */
+    button.pill {
+      cursor: pointer;
+      outline: none;
+      transition: background 0.2s, border-color 0.2s;
+    }
+    button.pill:hover:not(.on) {
+      background: #f3f4f6;
+      border-color: #d1d5db;
+    }
+    button.pill.on {
+      cursor: default;
+    }
+
+    /* Form Elements */
+    textarea {
+      border: 1px solid var(--border); 
+      background: #ffffff; 
+      color: var(--text);
+      border-radius: 6px; 
+      padding: 12px; 
+      outline: none;
+      font-family: var(--sans);
+      width: 100%;
+      resize: none;
+      line-height: 1.5;
+      flex: 1; /* Fills the space in notes panel */
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    textarea:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+    }
+
+    /* Buttons */
+    .btn {
+      border: 1px solid var(--border); 
+      background: #ffffff; 
+      color: var(--text);
+      border-radius: 6px; 
+      padding: 8px 12px; 
+      font-weight: 500; 
+      font-size: 13px;
+      cursor: pointer;
+      transition: all 0.2s;
+      box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+    }
+    .btn:hover { background: #f9fafb; border-color: #d1d5db; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn.small { padding: 4px 10px; font-size: 12px; }
+
+    .btn.good {
+      border-color: transparent;
+      color: #ffffff;
+      background: var(--success);
+    }
+    .btn.good:hover { background: #15803d; }
+    
+    .btn.bad {
+      border-color: transparent;
+      color: #ffffff;
+      background: var(--danger);
+    }
+    .btn.bad:hover { background: #b91c1c; }
+
+    .btn.ghost-bad {
+      border-color: transparent;
+      color: var(--danger);
+      background: transparent;
+      box-shadow: none;
+    }
+    .btn.ghost-bad:hover { background: #fef2f2; }
+
+    /* Utilities */
+    .inline { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .split { display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+
+    /* Timers / Tasks Grid */
+    .tasks { 
+      display: grid; 
+      grid-template-columns: 1fr; /* Stacked neatly in half-width panel */
+      gap: 12px; 
+    }
+    .task {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border: 1px solid var(--border);
+      border-radius: 8px; 
+      padding: 12px 16px;
+      background: #ffffff;
+      transition: border-color 0.2s;
+    }
+    .task.active { 
+      border-color: var(--accent); 
+      box-shadow: 0 0 0 1px var(--accent);
+    }
+    .tname { font-weight: 600; font-size: 14px; color: var(--text); }
+    .ttime { font-family: var(--mono); font-weight: 600; font-size: 13px; color: var(--text); }
+
+    /* Menus */
+    details.menu { position: relative; }
+    details.menu summary {
+      list-style: none; cursor: pointer; user-select: none;
+      border: 1px solid var(--border); background: #ffffff; border-radius: 6px; 
+      padding: 4px 10px; font-weight: 500; font-size: 12px; color: var(--text);
+      box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+    }
+    details.menu summary::-webkit-details-marker { display: none; }
+    details.menu summary:hover { background: #f9fafb; }
+    
+    .menuBox {
+      position: absolute; right: 0; top: 32px; min-width: 160px;
+      border: 1px solid var(--border); background: #ffffff; border-radius: 8px; 
+      padding: 6px; display: grid; gap: 4px; z-index: 50;
+      box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+    }
+    .menuBox button { 
+      width: 100%; text-align: left; background: transparent; 
+      border: none; box-shadow: none; color: var(--text);
+    }
+    .menuBox button:hover { background: #f3f4f6; }
+
+    /* Tables */
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    th { color: var(--muted); font-weight: 600; text-transform: uppercase; font-size: 11px; letter-spacing: 0.05em; text-align: left; }
+    .right { text-align: right; }
+    .noteCell { white-space: pre-wrap; word-break: break-word; color: var(--text); max-width: 500px; }
+
+    /* Day-grouped log */
+    .dayGroups { display: grid; gap: 12px; }
+    details.dayGroup {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      background: #ffffff;
+    }
+    details.dayGroup summary {
+      list-style: none; cursor: pointer; user-select: none;
+      padding: 12px 16px; display: flex; align-items: center; 
+      justify-content: space-between; gap: 10px; flex-wrap: wrap;
+      background: #f9fafb;
+    }
+    details.dayGroup summary::-webkit-details-marker { display: none; }
+    details.dayGroup[open] summary { border-bottom: 1px solid var(--border); }
+    
+    .daySumLeft { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .daySumRight { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: flex-end; }
+    .dayTotal { font-family: var(--mono); font-weight: 600; color: var(--text); }
+    .dayMeta { color: var(--muted); font-size: 12px; font-family: var(--mono); white-space: nowrap; }
+    .dayInner { padding: 0; background: #ffffff; }
+
+    /* Toasts */
+    .toast {
+      position: fixed; left: 50%; transform: translateX(-50%);
+      bottom: 24px; background: #1f2937; border: none;
+      padding: 12px 20px; border-radius: 8px; color: #f9fafb;
+      font-size: 14px; font-weight: 500;
+      display: none; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);
+      z-index: 100;
+    }
+    .toast.show { display: block; animation: fadeup 0.2s ease-out forwards; }
+    
+    @keyframes fadeup {
+      from { opacity: 0; transform: translate(-50%, 10px); }
+      to { opacity: 1; transform: translate(-50%, 0); }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    
+    <div class="topbar">
+      <div class="inline">
+        <h1>FleetHours</h1>
+        <span class="pill" id="statusPill">Idle</span>
+        <span class="pill on mono" id="currentLogPill">Log 1</span>
+      </div>
+      <div class="inline">
+        <span class="muted mono" style="margin-right: 12px; font-size: 11px;">1–9: Start • Space: Stop</span>
+        <button class="btn" id="btnNewLog">+ New Log</button>
+        <details class="menu" id="exportMenu">
+          <summary>Export ▾</summary>
+          <div class="menuBox">
+            <button class="btn small" id="btnExportEntries">Export log CSV</button>
+            <button class="btn small" id="btnExportTotals">Export totals CSV</button>
+            <button class="btn small" id="btnCopySummary">Copy summary</button>
+          </div>
+        </details>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="panel">
+        <div class="hd">
+          <div class="inline">
+            <span class="hd-title">Task Timers</span>
+          </div>
+          <div class="inline muted">
+            <span>Active:</span>
+            <span class="mono" id="activeName" style="color: var(--text); font-weight: 500;">—</span>
+          </div>
+        </div>
+        <div class="bd">
+          <div class="tasks" id="taskList"></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="hd">
+          <div class="inline">
+            <span class="hd-title">Session Notes</span>
+          </div>
+          <div class="inline muted" style="font-size: 12px;">
+            <span>Attached to:</span>
+            <span class="mono" id="noteFor" style="color: var(--text); font-weight: 500;">—</span>
+          </div>
+        </div>
+        <div class="bd">
+          <textarea id="noteBox" placeholder="Enter details or notes for the active task here. Notes save automatically when switching tasks or stopping the timer..."></textarea>
+          <div class="split muted" style="margin-top: 12px; font-size: 12px;">
+            <span>Notes are synced automatically.</span>
+            <span class="mono">Characters: <span id="noteCount">0</span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="hd">
+        <div class="inline">
+          <span class="hd-title">Logs</span>
+          <span class="pill" id="logCount">0</span>
+        </div>
+        <button class="btn small ghost-bad" id="btnClearAll">Clear all logs</button>
+      </div>
+      <div class="bd" style="overflow:auto; max-height: 60vh; padding: 16px;">
+        <div class="dayGroups" id="logDays"></div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+<script>
+(() => {
+  const LS_V5 = "timerboard_pro_v5"; 
+  const $ = (id) => document.getElementById(id);
+
+  const el = {
+    statusPill: $("statusPill"),
+    currentLogPill: $("currentLogPill"),
+    btnNewLog: $("btnNewLog"),
+    exportMenu: $("exportMenu"),
+    btnExportEntries: $("btnExportEntries"),
+    btnExportTotals: $("btnExportTotals"),
+    btnCopySummary: $("btnCopySummary"),
+    activeName: $("activeName"),
+    noteFor: $("noteFor"),
+    noteBox: $("noteBox"),
+    noteCount: $("noteCount"),
+    taskList: $("taskList"),
+    logDays: $("logDays"),
+    logCount: $("logCount"),
+    btnClearAll: $("btnClearAll"),
+    toast: $("toast"),
+  };
+
+  const pad2 = (n) => String(n).padStart(2,"0");
+  const nowISO = () => new Date().toISOString();
+  const fmtLocal = (iso) => {
+    if(!iso) return "—";
+    try{
+      return new Date(iso).toLocaleString(undefined,{
+        year:"numeric", month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit", second:"2-digit"
+      });
+    }catch{ return "—"; }
+  };
+  const fmtHMS = (ms) => {
+    const s = Math.max(0, Math.floor(ms/1000));
+    const hh = Math.floor(s/3600);
+    const mm = Math.floor((s%3600)/60);
+    const ss = s%60;
+    return `${pad2(hh)}:${pad2(mm)}:${pad2(ss)}`;
+  };
+  const uid = () => Math.random().toString(16).slice(2) + "-" + Math.random().toString(16).slice(2);
+
+  const toast = (msg, ms=2500) => {
+    el.toast.textContent = msg;
+    el.toast.classList.add("show");
+    clearTimeout(toast._t);
+    toast._t = setTimeout(() => el.toast.classList.remove("show"), ms);
+  };
+
+  const DEFAULT_TASKS = [
+    "Tasks + QA",
+    "Slack Correspondence",
+    "Exploring Environments",
+    "Guidelines Reading",
+    "Feedback Editing",
+    "Meetings",
+  ];
+
+  const makeLog = (label, tasks) => ({
+    id: uid(),
+    label,
+    createdAt: nowISO(),
+    active: null,
+    focusTaskId: tasks[0]?.id || "",
+    noteDraftByTask: {},     
+    entries: [],             
+    totalsByTask: {}         
+  });
+
+  const initV5 = () => {
+    const tasks = DEFAULT_TASKS.map((name,i)=>({ id: uid(), name, hotkey: String(i+1) }));
+    const log1 = makeLog("Log 1", tasks);
+    return {
+      v: 5,
+      tasks,
+      dayOrder: [log1.id],     
+      currentDayId: log1.id,
+      days: { [log1.id]: log1 }
+    };
+  };
+
+  let state = loadV5() || initV5();
+
+  function saveV5(){ try{ localStorage.setItem(LS_V5, JSON.stringify(state)); }catch{} }
+  
+  function loadV5(){
+    try{
+      const raw = localStorage.getItem(LS_V5);
+      if(!raw) return null;
+      const s = JSON.parse(raw);
+      if(!s || s.v !== 5) return null;
+      
+      // Auto-fix numbers/labels upon load to match absolute array length
+      if (s.dayOrder && s.days) {
+        const len = s.dayOrder.length;
+        for (let i = 0; i < len; i++) {
+          const id = s.dayOrder[i];
+          if (s.days[id]) {
+            s.days[id].label = `Log ${len - i}`;
+          }
+        }
+      }
+      return s;
+    }catch{ return null; }
+  }
+
+  // Renames all logs dynamically so they match the total count sequentially
+  function reindexLogs() {
+    const len = state.dayOrder.length;
+    for (let i = 0; i < len; i++) {
+      const id = state.dayOrder[i];
+      if (state.days[id]) {
+        state.days[id].label = `Log ${len - i}`;
+      }
+    }
+  }
+
+  function ensureLog(logId){
+    if(!state.days[logId]){
+      const d = makeLog("Temp", state.tasks);
+      state.days[d.id] = d;
+      state.dayOrder.unshift(d.id);
+      state.currentDayId = d.id;
+      reindexLogs();
+    }
+    const d = state.days[logId];
+    if(!("noteDraftByTask" in d)) d.noteDraftByTask = {};
+    if(!("focusTaskId" in d)) d.focusTaskId = state.tasks[0]?.id || "";
+    if(!("createdAt" in d)) d.createdAt = nowISO();
+    if(!("label" in d)) d.label = "Log";
+    if(!("entries" in d)) d.entries = [];
+    if(!("totalsByTask" in d)) d.totalsByTask = {};
+    return d;
+  }
+
+  function curLog(){ return ensureLog(state.currentDayId); }
+  function taskById(id){ return state.tasks.find(t => t.id === id) || null; }
+
+  function focusTaskId(){
+    const log = curLog();
+    return (log.active && log.active.taskId)
+      ? log.active.taskId
+      : (log.focusTaskId || state.tasks[0]?.id || "");
+  }
+  
+  function setFocusTaskId(taskId){
+    const log = curLog();
+    log.focusTaskId = taskId || log.focusTaskId || (state.tasks[0]?.id || "");
+  }
+  
+  function getDraft(taskId){
+    const log = curLog();
+    return (log.noteDraftByTask && log.noteDraftByTask[taskId]) ? log.noteDraftByTask[taskId] : "";
+  }
+  
+  function setDraft(taskId, text){
+    const log = curLog();
+    if(!log.noteDraftByTask) log.noteDraftByTask = {};
+    log.noteDraftByTask[taskId] = text || "";
+  }
+
+  function renderNoteFor(){
+    const tid = focusTaskId();
+    const t = taskById(tid);
+    el.noteFor.textContent = t ? t.name : "—";
+  }
+
+  function loadNoteBoxFor(taskId){
+    setFocusTaskId(taskId);
+    const tid = focusTaskId();
+    el.noteBox.value = getDraft(tid);
+    updateNoteCount();
+    renderNoteFor();
+  }
+
+  function syncDraftFromUI(){
+    const tid = focusTaskId();
+    if(!tid) return;
+    setDraft(tid, el.noteBox.value || "");
+  }
+
+  function stopActive(){
+    const log = curLog();
+    if(!log.active) return;
+
+    syncDraftFromUI();
+
+    const taskId = log.active.taskId;
+    const task = taskById(taskId);
+    const endEpoch = Date.now();
+    const startEpoch = log.active.startEpoch || endEpoch;
+    const durMs = Math.max(0, endEpoch - startEpoch);
+
+    const entry = {
+      id: uid(),
+      taskId: task?.id || "",
+      taskName: task?.name || "Unknown",
+      startISO: log.active.startISO || nowISO(),
+      endISO: nowISO(),
+      durMs,
+      note: (getDraft(taskId) || "").trim()
+    };
+
+    log.entries.unshift(entry);
+    if(entry.taskId){
+      log.totalsByTask[entry.taskId] = (log.totalsByTask[entry.taskId]||0) + durMs;
+    }
+
+    log.active = null;
+    setFocusTaskId(taskId);
+
+    saveV5();
+    updateHeaderAndTasks();
+    ensureLogDOM(log.id);
+    refreshLog(log.id);
+    loadNoteBoxFor(taskId);
+  }
+
+  function startTask(taskId){
+    const log = curLog();
+    if(log.active && log.active.taskId !== taskId){
+      stopActive();
+    } else if(log.active && log.active.taskId === taskId){
+      return;
+    }
+
+    loadNoteBoxFor(taskId);
+
+    log.active = { taskId, startISO: nowISO(), startEpoch: Date.now() };
+    saveV5();
+    updateHeaderAndTasks();
+    el.noteBox.focus();
+  }
+
+  function toggleTask(taskId){
+    const log = curLog();
+    if(log.active && log.active.taskId === taskId){
+      stopActive();
+      return;
+    }
+    startTask(taskId);
+  }
+
+  function switchToLog(logId){
+    const log = curLog();
+    if(log.active){
+      toast("Stop the running timer before switching logs.");
+      return;
+    }
+    
+    const prevId = state.currentDayId;
+    state.currentDayId = logId;
+    ensureLog(logId);
+
+    const d = ensureLog(logId);
+    const tid = (d.active && d.active.taskId) ? d.active.taskId : (d.focusTaskId || state.tasks[0]?.id || "");
+    loadNoteBoxFor(tid);
+
+    saveV5();
+    renderTasks();
+    updateHeaderAndTasks();
+    
+    if(prevId !== logId && logUI.has(prevId)) {
+        refreshLogSummary(prevId);
+    }
+  }
+
+  function deleteLog(logId) {
+    if(!confirm("Are you sure you want to delete this log?")) return;
+    
+    if(state.currentDayId === logId && curLog().active) {
+      toast("Stop the running timer before deleting this log.");
+      return;
+    }
+
+    // Remove from array and object
+    state.dayOrder = state.dayOrder.filter(id => id !== logId);
+    delete state.days[logId];
+
+    // Fallback if we deleted the currently active log
+    if (state.currentDayId === logId) {
+      if (state.dayOrder.length > 0) {
+        state.currentDayId = state.dayOrder[0];
+      } else {
+        const newLog = makeLog("Temp", state.tasks);
+        state.days[newLog.id] = newLog;
+        state.dayOrder.unshift(newLog.id);
+        state.currentDayId = newLog.id;
+      }
+    }
+
+    reindexLogs(); // Rename remaining logs to perfectly reflect current count
+    saveV5();
+    
+    const newCurrent = curLog();
+    const tid = (newCurrent.active && newCurrent.active.taskId) ? newCurrent.active.taskId : (newCurrent.focusTaskId || state.tasks[0]?.id || "");
+    loadNoteBoxFor(tid);
+    
+    renderTasks();
+    renderLogAll();
+    updateHeaderAndTasks();
+    
+    toast("Log deleted.");
+  }
+
+  function totalMsForLog(logId){
+    const d = ensureLog(logId);
+    let total = 0;
+    for(const ms of Object.values(d.totalsByTask || {})) total += (ms||0);
+    if(d.active){
+      total += Math.max(0, Date.now() - (d.active.startEpoch || Date.now()));
+    }
+    return total;
+  }
+
+  function taskMsForCurrentLog(taskId){
+    const d = curLog();
+    let ms = (d.totalsByTask && d.totalsByTask[taskId]) ? d.totalsByTask[taskId] : 0;
+    if(d.active && d.active.taskId === taskId){
+      ms += Math.max(0, Date.now() - (d.active.startEpoch || Date.now()));
+    }
+    return ms;
+  }
+
+  function logStartEnd(logId){
+    const d = ensureLog(logId);
+    let start = null;
+    let end = null;
+
+    if(d.entries && d.entries.length){
+      const oldest = d.entries[d.entries.length - 1];
+      const newest = d.entries[0];
+      start = oldest?.startISO || null;
+      end = newest?.endISO || null;
+    } else {
+      start = d.createdAt || null;
+      end = d.createdAt || null;
+    }
+
+    if(d.active){
+      end = nowISO();
+      if(!start) start = d.active.startISO || d.createdAt || null;
+    }
+
+    return {start, end};
+  }
+
+  // ----- Rendering -----
+  const taskUI = new Map(); 
+
+  function renderTasks(){
+    el.taskList.innerHTML = "";
+    taskUI.clear();
+
+    for(const t of state.tasks){
+      const row = document.createElement("div");
+      row.className = "task";
+      row.innerHTML = `
+        <div>
+          <div class="tname">${escapeHtml(t.name)}</div>
+        </div>
+        <div class="inline">
+          <span class="ttime" data-time="1">00:00:00</span>
+          <button class="btn small good">Start</button>
+        </div>
+      `;
+
+      const timeEl = row.querySelector('[data-time="1"]');
+      const btn = row.querySelector("button");
+      btn.addEventListener("click", () => toggleTask(t.id));
+
+      el.taskList.appendChild(row);
+      taskUI.set(t.id, { row, timeEl, btn });
+    }
+
+    updateAllTaskRows();
+  }
+
+  function updateAllTaskRows(){
+    const d = curLog();
+
+    for(const t of state.tasks){
+      const ui = taskUI.get(t.id);
+      if(!ui) continue;
+
+      const isActive = !!(d.active && d.active.taskId === t.id);
+      ui.row.className = "task" + (isActive ? " active" : "");
+
+      const wantText = fmtHMS(taskMsForCurrentLog(t.id));
+      if(ui.timeEl.textContent !== wantText) ui.timeEl.textContent = wantText;
+
+      const wantBtnText = isActive ? "Stop" : "Start";
+      if(ui.btn.textContent !== wantBtnText) ui.btn.textContent = wantBtnText;
+
+      const wantClass = isActive ? "btn small bad" : "btn small good";
+      if(ui.btn.className !== wantClass) ui.btn.className = wantClass;
+    }
+  }
+
+  function renderHeader(){
+    const d = curLog();
+    el.currentLogPill.textContent = d.label || "Log";
+
+    const task = d.active ? taskById(d.active.taskId) : null;
+    if(!task){
+      el.statusPill.textContent = "Idle";
+      el.statusPill.className = "pill";
+      el.activeName.textContent = "—";
+    } else {
+      el.statusPill.textContent = "Running";
+      el.statusPill.className = "pill on";
+      el.activeName.textContent = task.name;
+    }
+    renderNoteFor();
+  }
+
+  function updateHeaderAndTasks(){
+    renderHeader();
+    updateAllTaskRows();
+    if(logUI.has(state.currentDayId)) refreshLogSummary(state.currentDayId);
+    updateLogCount();
+  }
+
+  function updateNoteCount(){
+    el.noteCount.textContent = String((el.noteBox.value || "").length);
+  }
+
+  // ----- Log Panels -----
+  const logUI = new Map(); 
+
+  function updateLogCount(){
+    el.logCount.textContent = String(state.dayOrder.length);
+  }
+
+  function renderLogAll(){
+    el.logDays.innerHTML = "";
+    logUI.clear();
+
+    for(const logId of state.dayOrder){
+      const node = buildLogDetails(logId);
+      el.logDays.appendChild(node.details);
+      logUI.set(logId, node);
+      refreshLog(logId);
+    }
+    updateLogCount();
+  }
+
+  function ensureLogDOM(logId){
+    ensureLog(logId);
+    if(logUI.has(logId)) return;
+
+    const node = buildLogDetails(logId);
+    const idx = state.dayOrder.indexOf(logId);
+    const before = state.dayOrder[idx - 1];
+    let inserted = false;
+
+    if(before && logUI.get(before)?.details?.nextSibling){
+      const beforeEl = logUI.get(before).details;
+      el.logDays.insertBefore(node.details, beforeEl.nextSibling);
+      inserted = true;
+    }
+    if(!inserted){
+      renderLogAll();
+      return;
+    }
+
+    logUI.set(logId, node);
+    refreshLog(logId);
+    updateLogCount();
+  }
+
+  function buildLogDetails(logId){
+    const d = ensureLog(logId);
+
+    const details = document.createElement("details");
+    details.className = "dayGroup";
+    details.setAttribute("data-logid", logId);
+
+    details.innerHTML = `
+      <summary>
+        <div class="daySumLeft">
+          <span style="font-weight: 600; font-size: 14px; color: var(--text);">${escapeHtml(d.label || "Log")}</span>
+          <button class="pill ${logId===state.currentDayId ? "on" : ""}" data-use="1" title="Set this as the active log">${logId===state.currentDayId ? "Current" : "Select"}</button>
+        </div>
+        <div class="daySumRight">
+          <span class="dayTotal" data-total="1">00:00:00</span>
+          <span class="pill" data-count="1" title="Total Entries">0</span>
+          <button class="btn small ghost-bad" data-delete="1" title="Delete Log">Delete</button>
+          <div class="dayMeta" data-meta="1" style="display:none"></div>
+        </div>
+      </summary>
+
+      <div class="dayInner">
+        <table>
+          <thead>
+            <tr>
+              <th>Task</th>
+              <th>Start/End</th>
+              <th class="right">Duration</th>
+              <th>Notes</th>
+              <th class="right"></th>
+            </tr>
+          </thead>
+          <tbody data-body="1"></tbody>
+        </table>
+      </div>
+    `;
+
+    const totalEl = details.querySelector('[data-total="1"]');
+    const countEl = details.querySelector('[data-count="1"]');
+    const metaEl = details.querySelector('[data-meta="1"]');
+    const useBtn = details.querySelector('button[data-use="1"]');
+    const deleteBtn = details.querySelector('button[data-delete="1"]');
+    const tbody = details.querySelector('[data-body="1"]');
+
+    useBtn.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation(); 
+      if (logId !== state.currentDayId) {
+          switchToLog(logId);
+      }
+    });
+
+    deleteBtn.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      deleteLog(logId);
+    });
+
+    return { details, totalEl, countEl, metaEl, useBtn, tbody };
+  }
+
+  function refreshLogSummary(logId){
+    const ui = logUI.get(logId);
+    if(!ui) return;
+
+    const d = ensureLog(logId);
+
+    ui.totalEl.textContent = fmtHMS(totalMsForLog(logId));
+    ui.countEl.textContent = String((d.entries || []).length);
+
+    const {start, end} = logStartEnd(logId);
+    ui.metaEl.textContent = `Start: ${fmtLocal(start)} • End: ${fmtLocal(end)}`;
+
+    const curPill = ui.details.querySelector('button[data-use="1"]');
+    if(curPill){
+      const isCur = (logId === state.currentDayId);
+      curPill.textContent = isCur ? "Current" : "Select";
+      curPill.className = "pill" + (isCur ? " on" : "");
+    }
+  }
+
+  function refreshLog(logId){
+    const ui = logUI.get(logId);
+    if(!ui) return;
+
+    const d = ensureLog(logId);
+    refreshLogSummary(logId);
+
+    ui.tbody.innerHTML = "";
+
+    if ((d.entries || []).length === 0) {
+       ui.tbody.innerHTML = `<tr><td colspan="5" class="muted" style="text-align:center; padding: 24px;">No completed entries yet.</td></tr>`;
+       return;
+    }
+
+    for(const e of (d.entries || [])){
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td style="font-weight: 500;">${escapeHtml(e.taskName)}</td>
+        <td class="mono muted" style="font-size:12px">${escapeHtml(fmtLocal(e.startISO).split(', ')[1] || '—')} - ${escapeHtml(fmtLocal(e.endISO).split(', ')[1] || '—')}</td>
+        <td class="mono right" style="font-weight: 500;">${fmtHMS(e.durMs||0)}</td>
+        <td class="noteCell" style="font-size: 12px;">${escapeHtml(e.note||"")}</td>
+        <td class="right"><button class="btn small ghost-bad" data-del="${escapeHtml(e.id)}">✕</button></td>
+      `;
+
+      tr.querySelector("button[data-del]").addEventListener("click", () => {
+        const idx = d.entries.findIndex(x => x.id === e.id);
+        if(idx >= 0){
+          d.entries.splice(idx, 1);
+          if(e.taskId){
+            d.totalsByTask[e.taskId] = Math.max(0, (d.totalsByTask[e.taskId]||0) - (e.durMs||0));
+          }
+          saveV5();
+          refreshLog(logId);
+          if(logId === state.currentDayId) updateAllTaskRows();
+        }
+      });
+
+      ui.tbody.appendChild(tr);
+    }
+  }
+
+  // ----- Export / Summary -----
+  function exportCSV(filename, rows){
+    const csv = rows.map(r => r.map(cell => {
+      const s = String(cell ?? "");
+      return /[,"\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
+    }).join(",")).join("\n");
+
+    const blob = new Blob([csv], {type:"text/csv;charset=utf-8"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function exportEntriesCSV(){
+    const d = curLog();
+    const rows = [["log","task","start_local","end_local","duration_hms","duration_seconds","note"]];
+    for(const e of (d.entries || []).slice().reverse()){
+      rows.push([
+        d.label,
+        e.taskName,
+        fmtLocal(e.startISO),
+        fmtLocal(e.endISO),
+        fmtHMS(e.durMs||0),
+        Math.round((e.durMs||0)/1000),
+        e.note || ""
+      ]);
+    }
+    exportCSV(`timer_entries_${d.label.replaceAll(" ","_")}.csv`, rows);
+  }
+
+  function exportTotalsCSV(){
+    const rows = [["log","log_start_local","log_end_local","task","total_hms","total_seconds"]];
+    const idsOldestFirst = state.dayOrder.slice().reverse();
+
+    for(const logId of idsOldestFirst){
+      const d = ensureLog(logId);
+      const m = new Map(); 
+      for(const e of (d.entries || [])){
+        m.set(e.taskName, (m.get(e.taskName)||0) + (e.durMs||0));
+      }
+      const {start, end} = logStartEnd(logId);
+
+      for(const taskName of Array.from(m.keys()).sort()){
+        const ms = m.get(taskName) || 0;
+        rows.push([
+          d.label,
+          fmtLocal(start),
+          fmtLocal(end),
+          taskName,
+          fmtHMS(ms),
+          Math.round(ms/1000)
+        ]);
+      }
+    }
+    exportCSV(`timer_totals.csv`, rows);
+  }
+
+  async function copySummary(){
+    const d = curLog();
+    const lines = [`${d.label}`];
+
+    const items = state.tasks.map(t => [t.name, taskMsForCurrentLog(t.id)])
+      .filter(x => x[1] > 0)
+      .sort((a,b)=>b[1]-a[1]);
+
+    for(const [name, ms] of items) lines.push(`- ${name}: ${fmtHMS(ms)}`);
+
+    const text = lines.join("\n");
+    try{
+      await navigator.clipboard.writeText(text);
+      toast("Summary copied.");
+    }catch{
+      toast("Clipboard blocked; summary printed to console.");
+      console.log(text);
+    }
+  }
+
+  function escapeHtml(s){
+    return String(s ?? "")
+      .replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;")
+      .replaceAll('"',"&quot;").replaceAll("'","&#039;");
+  }
+
+  // ----- Events -----
+  let noteSaveT = null;
+  el.noteBox.addEventListener("input", () => {
+    const tid = focusTaskId();
+    if(tid) setDraft(tid, el.noteBox.value || "");
+    updateNoteCount();
+    clearTimeout(noteSaveT);
+    noteSaveT = setTimeout(saveV5, 350);
+  });
+
+  el.btnNewLog.addEventListener("click", () => {
+    if(curLog().active) stopActive();
+
+    const d = makeLog("Temp", state.tasks);
+
+    state.days[d.id] = d;
+    state.dayOrder.unshift(d.id);   
+    state.currentDayId = d.id;
+
+    reindexLogs(); // Calculate sequential names
+    saveV5();
+
+    loadNoteBoxFor(focusTaskId());
+    renderTasks();
+    renderLogAll(); // Renders all logs so sequence names update correctly             
+    updateHeaderAndTasks();
+    toast(`Started ${curLog().label}`);
+  });
+
+  el.btnExportEntries.addEventListener("click", () => { exportEntriesCSV(); el.exportMenu.open=false; });
+  el.btnExportTotals.addEventListener("click", () => { exportTotalsCSV(); el.exportMenu.open=false; });
+  el.btnCopySummary.addEventListener("click", () => { copySummary(); el.exportMenu.open=false; });
+
+  el.btnClearAll.addEventListener("click", () => {
+    if(curLog().active){
+      toast("Stop the running timer first before clearing logs.");
+      return;
+    }
+    if(!confirm("Are you sure you want to clear all logs and reset completely?")) return;
+    state = initV5();
+    saveV5();
+    loadNoteBoxFor(focusTaskId());
+    renderTasks();
+    renderLogAll();
+    updateHeaderAndTasks();
+  });
+
+  window.addEventListener("keydown", (e) => {
+    const typing = ["INPUT","TEXTAREA"].includes(document.activeElement?.tagName);
+    const k = e.key;
+
+    if((e.ctrlKey || e.metaKey) && k.toLowerCase()==="e"){
+      e.preventDefault();
+      exportEntriesCSV();
+      return;
+    }
+    if(k === " " && !typing){
+      e.preventDefault();
+      stopActive();
+      return;
+    }
+    if(!typing && /^[1-9]$/.test(k)){
+      const t = state.tasks.find(x => x.hotkey === k);
+      if(t){
+        e.preventDefault();
+        toggleTask(t.id);
+      }
+    }
+  });
+
+  {
+    const d = curLog();
+    if(d.active && !d.active.startEpoch){
+      d.active.startEpoch = Date.now();
+      if(!d.active.startISO) d.active.startISO = nowISO();
+      saveV5();
+    }
+  }
+
+  function tick(){
+    const d = curLog();
+    if(d.active){
+      const ms = Date.now() - (d.active.startEpoch || Date.now());
+      const want = fmtHMS(ms);
+
+      const uiTask = taskUI.get(d.active.taskId);
+      if(uiTask){
+        const wantTask = fmtHMS(taskMsForCurrentLog(d.active.taskId));
+        if(uiTask.timeEl.textContent !== wantTask) uiTask.timeEl.textContent = wantTask;
+      }
+    }
+    if(logUI.has(state.currentDayId)){
+      refreshLogSummary(state.currentDayId);
+    }
+  }
+
+  ensureLog(state.currentDayId);
+  loadNoteBoxFor(focusTaskId());
+  renderTasks();
+  renderLogAll();
+  updateHeaderAndTasks();
+  setInterval(tick, 250);
+})();
+</script>
+</body>
+</html>
