@@ -3,7 +3,10 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>FleetHours</title>
+  <title>FleetTimer</title>
+  
+  <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+
   <style>
     :root {
       /* Professional Light Theme */
@@ -115,7 +118,6 @@
       background: #eff6ff;
     }
 
-    /* Make the pill act as a button when needed */
     button.pill {
       cursor: pointer;
       outline: none;
@@ -130,7 +132,7 @@
     }
 
     /* Form Elements */
-    textarea {
+    textarea, input[type="text"] {
       border: 1px solid var(--border); 
       background: #ffffff; 
       color: var(--text);
@@ -141,10 +143,10 @@
       width: 100%;
       resize: none;
       line-height: 1.5;
-      flex: 1; /* Fills the space in notes panel */
       transition: border-color 0.2s, box-shadow 0.2s;
     }
-    textarea:focus {
+    textarea { flex: 1; }
+    textarea:focus, input[type="text"]:focus {
       border-color: var(--accent);
       box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
     }
@@ -194,8 +196,8 @@
 
     /* Timers / Tasks Grid */
     .tasks { 
-      display: grid; 
-      grid-template-columns: 1fr; /* Stacked neatly in half-width panel */
+      display: flex; 
+      flex-direction: column;
       gap: 12px; 
     }
     .task {
@@ -206,15 +208,47 @@
       border-radius: 8px; 
       padding: 12px 16px;
       background: #ffffff;
-      transition: border-color 0.2s;
+      transition: border-color 0.2s, box-shadow 0.2s;
     }
     .task.active { 
       border-color: var(--accent); 
       box-shadow: 0 0 0 1px var(--accent);
     }
-    .tname { font-weight: 600; font-size: 14px; color: var(--text); }
+    .drag-handle {
+      cursor: grab;
+      color: #9ca3af;
+      padding-right: 8px;
+      display: flex;
+      align-items: center;
+    }
+    .drag-handle:active { cursor: grabbing; }
+    .drag-handle:hover { color: var(--text); }
+    
+    .sortable-ghost {
+      opacity: 0.4;
+      background: #eff6ff !important;
+      border: 1px dashed var(--accent) !important;
+    }
+
+    .tname { font-weight: 600; font-size: 14px; color: var(--text); pointer-events: none; }
     .ttime { font-family: var(--mono); font-weight: 600; font-size: 13px; color: var(--text); }
 
+    /* Meeting Accordion */
+    details.meeting-group {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #ffffff;
+      overflow: hidden;
+      width: 100%;
+    }
+    details.meeting-group summary {
+      list-style: none; cursor: pointer; user-select: none;
+      padding: 12px 16px; display: flex; align-items: center; 
+      background: #f9fafb; font-weight: 600; font-size: 14px;
+    }
+    details.meeting-group summary::-webkit-details-marker { display: none; }
+    details.meeting-group[open] summary { border-bottom: 1px solid var(--border); }
+    
     /* Menus */
     details.menu { position: relative; }
     details.menu summary {
@@ -290,12 +324,11 @@
     
     <div class="topbar">
       <div class="inline">
-        <h1>FleetHours</h1>
+        <h1>Fleet Timer</h1>
         <span class="pill" id="statusPill">Idle</span>
         <span class="pill on mono" id="currentLogPill">Log 1</span>
       </div>
       <div class="inline">
-        <span class="muted mono" style="margin-right: 12px; font-size: 11px;">1–9: Start • Space: Stop</span>
         <button class="btn" id="btnNewLog">+ New Log</button>
         <details class="menu" id="exportMenu">
           <summary>Export ▾</summary>
@@ -319,8 +352,15 @@
             <span class="mono" id="activeName" style="color: var(--text); font-weight: 500;">—</span>
           </div>
         </div>
-        <div class="bd">
-          <div class="tasks" id="taskList"></div>
+        <div class="bd" style="overflow-y: auto; max-height: 60vh;">
+          
+          <div class="tasks" id="taskListMain" style="padding-bottom: 12px;"></div>
+
+          <div style="display: flex; gap: 8px;">
+            <input type="text" id="newTimerInput" placeholder="Create a new custom timer..." style="padding:8px 12px; font-size:13px; flex: 1;">
+            <button class="btn" id="btnAddTimer">Add</button>
+          </div>
+
         </div>
       </div>
 
@@ -363,7 +403,8 @@
 
 <script>
 (() => {
-  const LS_V5 = "timerboard_pro_v5"; 
+  const LS_V12 = "timerboard_pro_v12"; 
+  const LS_V11 = "timerboard_pro_v11"; 
   const $ = (id) => document.getElementById(id);
 
   const el = {
@@ -378,7 +419,9 @@
     noteFor: $("noteFor"),
     noteBox: $("noteBox"),
     noteCount: $("noteCount"),
-    taskList: $("taskList"),
+    taskListMain: $("taskListMain"),
+    newTimerInput: $("newTimerInput"),
+    btnAddTimer: $("btnAddTimer"),
     logDays: $("logDays"),
     logCount: $("logCount"),
     btnClearAll: $("btnClearAll"),
@@ -387,6 +430,7 @@
 
   const pad2 = (n) => String(n).padStart(2,"0");
   const nowISO = () => new Date().toISOString();
+  
   const fmtLocal = (iso) => {
     if(!iso) return "—";
     try{
@@ -395,6 +439,7 @@
       });
     }catch{ return "—"; }
   };
+  
   const fmtHMS = (ms) => {
     const s = Math.max(0, Math.floor(ms/1000));
     const hh = Math.floor(s/3600);
@@ -413,11 +458,11 @@
 
   const DEFAULT_TASKS = [
     "Tasks + QA",
-    "Slack Correspondence",
+    "Slack Reading + Correspondence",
     "Exploring Environments",
     "Guidelines Reading",
     "Feedback Editing",
-    "Meetings",
+    "Platform Downtime"
   ];
 
   const makeLog = (label, tasks) => ({
@@ -425,71 +470,96 @@
     label,
     createdAt: nowISO(),
     active: null,
-    focusTaskId: tasks[0]?.id || "",
+    focusTaskId: tasks.length ? tasks[0].id : "",
     noteDraftByTask: {},     
     entries: [],             
-    totalsByTask: {}         
+    totalsByTask: {},
+    tasks: JSON.parse(JSON.stringify(tasks)) 
   });
 
-  const initV5 = () => {
-    const tasks = DEFAULT_TASKS.map((name,i)=>({ id: uid(), name, hotkey: String(i+1) }));
+  const initV12 = () => {
+    const tasks = DEFAULT_TASKS.map(name => ({ id: uid(), name, isMeeting: false, isDeletable: false }));
+    tasks.push({ id: uid(), name: "Meetings Accordion", isMeetingGroup: true, isDeletable: false });
+    
     const log1 = makeLog("Log 1", tasks);
     return {
-      v: 5,
-      tasks,
+      v: 12,
       dayOrder: [log1.id],     
       currentDayId: log1.id,
       days: { [log1.id]: log1 }
     };
   };
 
-  let state = loadV5() || initV5();
-
-  function saveV5(){ try{ localStorage.setItem(LS_V5, JSON.stringify(state)); }catch{} }
+  function saveV12(){ try{ localStorage.setItem(LS_V12, JSON.stringify(state)); }catch{} }
   
-  function loadV5(){
+  function loadV12(){
     try{
-      const raw = localStorage.getItem(LS_V5);
-      if(!raw) return null;
-      const s = JSON.parse(raw);
-      if(!s || s.v !== 5) return null;
-      
-      // Auto-fix numbers/labels upon load to match absolute array length
-      if (s.dayOrder && s.days) {
-        const len = s.dayOrder.length;
-        for (let i = 0; i < len; i++) {
-          const id = s.dayOrder[i];
-          if (s.days[id]) {
-            s.days[id].label = `Log ${len - i}`;
-          }
+      let raw = localStorage.getItem(LS_V12);
+      if(raw) {
+        const s = JSON.parse(raw);
+        if(s && s.v === 12) {
+          reindexLogsState(s);
+          return s;
         }
       }
-      return s;
+      
+      // Auto-migrate from V11
+      raw = localStorage.getItem(LS_V11);
+      if(raw) {
+        const s = JSON.parse(raw);
+        if(s && s.v === 11) {
+          s.v = 12;
+          reindexLogsState(s);
+          return s;
+        }
+      }
+      return null;
     }catch{ return null; }
   }
 
-  // Renames all logs dynamically so they match the total count sequentially
-  function reindexLogs() {
-    const len = state.dayOrder.length;
-    for (let i = 0; i < len; i++) {
-      const id = state.dayOrder[i];
-      if (state.days[id]) {
-        state.days[id].label = `Log ${len - i}`;
+  function reindexLogsState(s) {
+    if (s.dayOrder && s.days) {
+      const len = s.dayOrder.length;
+      for (let i = 0; i < len; i++) {
+        const id = s.dayOrder[i];
+        if (s.days[id]) {
+          s.days[id].label = `Log ${len - i}`;
+        }
       }
     }
   }
 
+  let state = loadV12() || initV12();
+  let mainSortable = null;
+  let meetingSortable = null;
+  
+  function reindexLogs() {
+    reindexLogsState(state);
+  }
+
   function ensureLog(logId){
-    if(!state.days[logId]){
-      const d = makeLog("Temp", state.tasks);
+    let d = state.days[logId];
+    
+    // Safety Fallback: if DayOrder got out of sync with Days dictionary
+    if(!d){
+      state.dayOrder = state.dayOrder.filter(id => id !== logId);
+      const defaultTasks = DEFAULT_TASKS.map(name => ({ id: uid(), name, isMeeting: false, isDeletable: false }));
+      defaultTasks.push({ id: uid(), name: "Meetings Accordion", isMeetingGroup: true, isDeletable: false });
+      
+      d = makeLog("Temp", defaultTasks);
       state.days[d.id] = d;
       state.dayOrder.unshift(d.id);
-      state.currentDayId = d.id;
+      if(state.currentDayId === logId) state.currentDayId = d.id;
       reindexLogs();
     }
-    const d = state.days[logId];
+    
     if(!("noteDraftByTask" in d)) d.noteDraftByTask = {};
-    if(!("focusTaskId" in d)) d.focusTaskId = state.tasks[0]?.id || "";
+    if(!("tasks" in d)) {
+        const defaultTasks = DEFAULT_TASKS.map(name => ({ id: uid(), name, isMeeting: false, isDeletable: false }));
+        defaultTasks.push({ id: uid(), name: "Meetings Accordion", isMeetingGroup: true, isDeletable: false });
+        d.tasks = defaultTasks;
+    }
+    if(!("focusTaskId" in d)) d.focusTaskId = d.tasks.length ? d.tasks[0].id : "";
     if(!("createdAt" in d)) d.createdAt = nowISO();
     if(!("label" in d)) d.label = "Log";
     if(!("entries" in d)) d.entries = [];
@@ -498,18 +568,18 @@
   }
 
   function curLog(){ return ensureLog(state.currentDayId); }
-  function taskById(id){ return state.tasks.find(t => t.id === id) || null; }
+  function taskById(id){ return curLog().tasks.find(t => t.id === id) || null; }
 
   function focusTaskId(){
     const log = curLog();
     return (log.active && log.active.taskId)
       ? log.active.taskId
-      : (log.focusTaskId || state.tasks[0]?.id || "");
+      : (log.focusTaskId || (log.tasks.length ? log.tasks[0].id : ""));
   }
   
   function setFocusTaskId(taskId){
     const log = curLog();
-    log.focusTaskId = taskId || log.focusTaskId || (state.tasks[0]?.id || "");
+    log.focusTaskId = taskId || log.focusTaskId || (log.tasks.length ? log.tasks[0].id : "");
   }
   
   function getDraft(taskId){
@@ -573,7 +643,7 @@
     log.active = null;
     setFocusTaskId(taskId);
 
-    saveV5();
+    saveV12();
     updateHeaderAndTasks();
     ensureLogDOM(log.id);
     refreshLog(log.id);
@@ -591,7 +661,7 @@
     loadNoteBoxFor(taskId);
 
     log.active = { taskId, startISO: nowISO(), startEpoch: Date.now() };
-    saveV5();
+    saveV12();
     updateHeaderAndTasks();
     el.noteBox.focus();
   }
@@ -617,10 +687,10 @@
     ensureLog(logId);
 
     const d = ensureLog(logId);
-    const tid = (d.active && d.active.taskId) ? d.active.taskId : (d.focusTaskId || state.tasks[0]?.id || "");
+    const tid = (d.active && d.active.taskId) ? d.active.taskId : (d.focusTaskId || (d.tasks.length ? d.tasks[0].id : ""));
     loadNoteBoxFor(tid);
 
-    saveV5();
+    saveV12();
     renderTasks();
     updateHeaderAndTasks();
     
@@ -637,27 +707,28 @@
       return;
     }
 
-    // Remove from array and object
     state.dayOrder = state.dayOrder.filter(id => id !== logId);
     delete state.days[logId];
 
-    // Fallback if we deleted the currently active log
     if (state.currentDayId === logId) {
       if (state.dayOrder.length > 0) {
         state.currentDayId = state.dayOrder[0];
       } else {
-        const newLog = makeLog("Temp", state.tasks);
+        const defaultTasks = DEFAULT_TASKS.map(name => ({ id: uid(), name, isMeeting: false, isDeletable: false }));
+        defaultTasks.push({ id: uid(), name: "Meetings Accordion", isMeetingGroup: true, isDeletable: false });
+        
+        const newLog = makeLog("Temp", defaultTasks);
         state.days[newLog.id] = newLog;
         state.dayOrder.unshift(newLog.id);
         state.currentDayId = newLog.id;
       }
     }
 
-    reindexLogs(); // Rename remaining logs to perfectly reflect current count
-    saveV5();
+    reindexLogs(); 
+    saveV12();
     
     const newCurrent = curLog();
-    const tid = (newCurrent.active && newCurrent.active.taskId) ? newCurrent.active.taskId : (newCurrent.focusTaskId || state.tasks[0]?.id || "");
+    const tid = (newCurrent.active && newCurrent.active.taskId) ? newCurrent.active.taskId : (newCurrent.focusTaskId || (newCurrent.tasks.length ? newCurrent.tasks[0].id : ""));
     loadNoteBoxFor(tid);
     
     renderTasks();
@@ -709,41 +780,202 @@
     return {start, end};
   }
 
-  // ----- Rendering -----
+  // ----- Rendering Tasks & SortableJS -----
   const taskUI = new Map(); 
+  
+  function syncTaskOrder() {
+    const newOrder = [];
+    
+    document.querySelectorAll('#taskListMain > div').forEach(el => {
+      if (el.dataset.isMeetingGroup) {
+        newOrder.push(el.dataset.taskId); 
+        
+        document.querySelectorAll('#taskListMeetings .task').forEach(mel => {
+          newOrder.push(mel.dataset.taskId);
+        });
+      } else if (el.dataset.taskId) {
+        newOrder.push(el.dataset.taskId);
+      }
+    });
+    
+    const taskMap = new Map(curLog().tasks.map(t => [t.id, t]));
+    curLog().tasks = newOrder.map(id => taskMap.get(id)).filter(Boolean);
+    saveV12();
+    renderTasks();
+  }
 
   function renderTasks(){
-    el.taskList.innerHTML = "";
+    
+    // Explicitly unmount Sortable to prevent silent JavaScript thread crashes
+    try {
+        if (mainSortable) { mainSortable.destroy(); mainSortable = null; }
+        if (meetingSortable) { meetingSortable.destroy(); meetingSortable = null; }
+    } catch (e) {
+        mainSortable = null;
+        meetingSortable = null;
+    }
+
+    let mOpen = false;
+    const existingGroup = document.getElementById("meetingGroup");
+    if (existingGroup) { mOpen = existingGroup.open; }
+    else { mOpen = curLog().tasks.filter(t => t.isMeeting).length > 0; }
+
+    el.taskListMain.innerHTML = "";
     taskUI.clear();
 
-    for(const t of state.tasks){
-      const row = document.createElement("div");
-      row.className = "task";
-      row.innerHTML = `
-        <div>
-          <div class="tname">${escapeHtml(t.name)}</div>
-        </div>
-        <div class="inline">
-          <span class="ttime" data-time="1">00:00:00</span>
-          <button class="btn small good">Start</button>
-        </div>
-      `;
+    const meetingTasks = curLog().tasks.filter(t => t.isMeeting);
 
-      const timeEl = row.querySelector('[data-time="1"]');
-      const btn = row.querySelector("button");
-      btn.addEventListener("click", () => toggleTask(t.id));
+    for(const t of curLog().tasks) {
+      if (t.isMeeting) continue; 
 
-      el.taskList.appendChild(row);
-      taskUI.set(t.id, { row, timeEl, btn });
+      if (t.isMeetingGroup) {
+        const mGroupWrapper = document.createElement("div");
+        mGroupWrapper.dataset.isMeetingGroup = "true";
+        mGroupWrapper.dataset.taskId = t.id;
+        
+        mGroupWrapper.innerHTML = `
+          <details class="meeting-group" id="meetingGroup" ${mOpen ? "open" : ""}>
+            <summary style="display:flex; align-items:center;">
+              <div class="drag-handle" title="Drag to reorder section" style="cursor:grab; margin-right:8px; color:#9ca3af;" onclick="event.preventDefault();">
+                 <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                   <circle cx="9" cy="5" r="2"></circle><circle cx="15" cy="5" r="2"></circle>
+                   <circle cx="9" cy="12" r="2"></circle><circle cx="15" cy="12" r="2"></circle>
+                   <circle cx="9" cy="19" r="2"></circle><circle cx="15" cy="19" r="2"></circle>
+                 </svg>
+              </div>
+              <div class="inline">
+                <span>Meetings</span>
+                <span class="pill">${meetingTasks.length}</span>
+              </div>
+              <button class="btn small" id="btnAddMeeting" style="margin-left:auto">+ Add Meeting</button>
+            </summary>
+            <div class="tasks" id="taskListMeetings" style="padding:12px;"></div>
+          </details>
+        `;
+
+        const mList = mGroupWrapper.querySelector("#taskListMeetings");
+        if(meetingTasks.length === 0){
+          mList.innerHTML = `<span class="muted" style="font-size:12px;">No meetings active. Click "+ Add Meeting" to create one.</span>`;
+        } else {
+          for(const mt of meetingTasks){
+            mList.appendChild(createTaskDOM(mt));
+          }
+        }
+
+        mGroupWrapper.querySelector("#btnAddMeeting").addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const name = prompt("Enter meeting name (e.g., 'Daily Sync'):");
+          if(name && name.trim()){
+            curLog().tasks.push({ id: uid(), name: name.trim(), isMeeting: true, isDeletable: true });
+            saveV12();
+            renderTasks();
+            updateAllTaskRows();
+            document.getElementById("meetingGroup").open = true;
+          }
+        });
+
+        el.taskListMain.appendChild(mGroupWrapper);
+
+      } else {
+        el.taskListMain.appendChild(createTaskDOM(t));
+      }
+    }
+
+    // Initialize fresh SortableJS
+    if (typeof Sortable !== 'undefined') {
+      mainSortable = new Sortable(el.taskListMain, {
+        group: 'mainTasks',
+        animation: 200,
+        handle: '.drag-handle',
+        ghostClass: 'sortable-ghost',
+        onEnd: syncTaskOrder
+      });
+
+      const meetingsListEl = document.getElementById("taskListMeetings");
+      if (meetingsListEl && meetingTasks.length > 0) {
+        meetingSortable = new Sortable(meetingsListEl, {
+          group: 'meetingTasks',
+          animation: 200,
+          handle: '.drag-handle',
+          ghostClass: 'sortable-ghost',
+          onEnd: syncTaskOrder
+        });
+      }
     }
 
     updateAllTaskRows();
   }
 
+  function createTaskDOM(t){
+    const row = document.createElement("div");
+    row.className = "task";
+    row.dataset.taskId = t.id;
+    row.innerHTML = `
+      <div style="display:flex; align-items:center; gap: 8px;">
+        <div class="drag-handle" title="Drag to reorder">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+             <circle cx="9" cy="5" r="2"></circle><circle cx="15" cy="5" r="2"></circle>
+             <circle cx="9" cy="12" r="2"></circle><circle cx="15" cy="12" r="2"></circle>
+             <circle cx="9" cy="19" r="2"></circle><circle cx="15" cy="19" r="2"></circle>
+          </svg>
+        </div>
+        <div class="tname">${escapeHtml(t.name)}</div>
+      </div>
+      <div class="inline">
+        <span class="ttime" data-time="1">00:00:00</span>
+        <button class="btn small good" data-action="toggle">Start</button>
+        ${t.isDeletable ? `<button class="btn small ghost-bad" data-action="del" title="Delete Timer">✕</button>` : ''}
+      </div>
+    `;
+
+    const timeEl = row.querySelector('[data-time="1"]');
+    const btn = row.querySelector('button[data-action="toggle"]');
+    btn.addEventListener("click", () => toggleTask(t.id));
+
+    const delBtn = row.querySelector('button[data-action="del"]');
+    if(delBtn){
+      delBtn.addEventListener("click", () => {
+        if(confirm(`Are you sure you want to permanently delete the timer "${t.name}"?`)){
+          if(curLog().active && curLog().active.taskId === t.id){
+            stopActive();
+          }
+          curLog().tasks = curLog().tasks.filter(x => x.id !== t.id);
+          saveV12();
+          renderTasks();
+          updateAllTaskRows();
+        }
+      });
+    }
+
+    taskUI.set(t.id, { row, timeEl, btn });
+    return row;
+  }
+
+  el.btnAddTimer.addEventListener("click", () => {
+    const name = el.newTimerInput.value.trim();
+    if(name){
+      const newTask = { id: uid(), name: name, isMeeting: false, isDeletable: true };
+      curLog().tasks.push(newTask); 
+      
+      saveV12();
+      renderTasks();
+      updateAllTaskRows();
+      el.newTimerInput.value = ""; 
+    }
+  });
+
+  el.newTimerInput.addEventListener("keydown", (e) => {
+    if(e.key === "Enter") {
+      e.preventDefault();
+      el.btnAddTimer.click();
+    }
+  });
+
   function updateAllTaskRows(){
     const d = curLog();
 
-    for(const t of state.tasks){
+    for(const t of d.tasks){
       const ui = taskUI.get(t.id);
       if(!ui) continue;
 
@@ -800,7 +1032,8 @@
     el.logDays.innerHTML = "";
     logUI.clear();
 
-    for(const logId of state.dayOrder){
+    // Iterate over cloned array just to be safe during DOM redraws
+    for(const logId of [...state.dayOrder]){
       const node = buildLogDetails(logId);
       el.logDays.appendChild(node.details);
       logUI.set(logId, node);
@@ -932,20 +1165,26 @@
       const tr = document.createElement("tr");
       tr.innerHTML = `
         <td style="font-weight: 500;">${escapeHtml(e.taskName)}</td>
-        <td class="mono muted" style="font-size:12px">${escapeHtml(fmtLocal(e.startISO).split(', ')[1] || '—')} - ${escapeHtml(fmtLocal(e.endISO).split(', ')[1] || '—')}</td>
+        <td class="mono muted" style="font-size:12px; line-height: 1.4;">
+            ${escapeHtml(fmtLocal(e.startISO))} <br>
+            <span style="opacity: 0.5;">to</span> <br>
+            ${escapeHtml(fmtLocal(e.endISO))}
+        </td>
         <td class="mono right" style="font-weight: 500;">${fmtHMS(e.durMs||0)}</td>
         <td class="noteCell" style="font-size: 12px;">${escapeHtml(e.note||"")}</td>
         <td class="right"><button class="btn small ghost-bad" data-del="${escapeHtml(e.id)}">✕</button></td>
       `;
 
       tr.querySelector("button[data-del]").addEventListener("click", () => {
+        if(!confirm("Are you sure you want to permanently delete this entry from the log?")) return; 
+        
         const idx = d.entries.findIndex(x => x.id === e.id);
         if(idx >= 0){
           d.entries.splice(idx, 1);
           if(e.taskId){
             d.totalsByTask[e.taskId] = Math.max(0, (d.totalsByTask[e.taskId]||0) - (e.durMs||0));
           }
-          saveV5();
+          saveV12();
           refreshLog(logId);
           if(logId === state.currentDayId) updateAllTaskRows();
         }
@@ -1020,7 +1259,7 @@
     const d = curLog();
     const lines = [`${d.label}`];
 
-    const items = state.tasks.map(t => [t.name, taskMsForCurrentLog(t.id)])
+    const items = d.tasks.map(t => [t.name, taskMsForCurrentLog(t.id)])
       .filter(x => x[1] > 0)
       .sort((a,b)=>b[1]-a[1]);
 
@@ -1049,24 +1288,26 @@
     if(tid) setDraft(tid, el.noteBox.value || "");
     updateNoteCount();
     clearTimeout(noteSaveT);
-    noteSaveT = setTimeout(saveV5, 350);
+    noteSaveT = setTimeout(saveV12, 350);
   });
 
   el.btnNewLog.addEventListener("click", () => {
     if(curLog().active) stopActive();
 
-    const d = makeLog("Temp", state.tasks);
+    // Pass the filtered tasks representing the "template" to the new log
+    const prevTasks = curLog().tasks.filter(t => !t.isMeeting);
+    const d = makeLog("Temp", prevTasks);
 
     state.days[d.id] = d;
     state.dayOrder.unshift(d.id);   
     state.currentDayId = d.id;
 
-    reindexLogs(); // Calculate sequential names
-    saveV5();
+    reindexLogs(); 
+    saveV12();
 
     loadNoteBoxFor(focusTaskId());
     renderTasks();
-    renderLogAll(); // Renders all logs so sequence names update correctly             
+    renderLogAll(); 
     updateHeaderAndTasks();
     toast(`Started ${curLog().label}`);
   });
@@ -1081,8 +1322,8 @@
       return;
     }
     if(!confirm("Are you sure you want to clear all logs and reset completely?")) return;
-    state = initV5();
-    saveV5();
+    state = initV12();
+    saveV12();
     loadNoteBoxFor(focusTaskId());
     renderTasks();
     renderLogAll();
@@ -1098,18 +1339,6 @@
       exportEntriesCSV();
       return;
     }
-    if(k === " " && !typing){
-      e.preventDefault();
-      stopActive();
-      return;
-    }
-    if(!typing && /^[1-9]$/.test(k)){
-      const t = state.tasks.find(x => x.hotkey === k);
-      if(t){
-        e.preventDefault();
-        toggleTask(t.id);
-      }
-    }
   });
 
   {
@@ -1117,7 +1346,7 @@
     if(d.active && !d.active.startEpoch){
       d.active.startEpoch = Date.now();
       if(!d.active.startISO) d.active.startISO = nowISO();
-      saveV5();
+      saveV12();
     }
   }
 
