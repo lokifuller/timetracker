@@ -518,6 +518,38 @@
   }
 
   let state = loadV12() || initV12();
+
+  let stateRepaired = false;
+  for (const logId of state.dayOrder) {
+    const d = state.days[logId];
+    if (d && d.active) {
+      const last = d.active.lastTick || d.active.startEpoch || Date.now();
+      if (Date.now() - last > 15000) {
+        const endEpoch = last;
+        const startEpoch = d.active.startEpoch || endEpoch;
+        const durMs = Math.max(0, endEpoch - startEpoch);
+        const task = d.tasks.find(t => t.id === d.active.taskId);
+        
+        d.entries.unshift({
+          id: uid(),
+          taskId: d.active.taskId || "",
+          taskName: task?.name || "Unknown",
+          startISO: d.active.startISO || new Date(startEpoch).toISOString(),
+          endISO: new Date(endEpoch).toISOString(),
+          durMs,
+          note: (d.noteDraftByTask[d.active.taskId] || "").trim()
+        });
+        
+        if (d.active.taskId) {
+          d.totalsByTask[d.active.taskId] = (d.totalsByTask[d.active.taskId] || 0) + durMs;
+        }
+        d.active = null;
+        stateRepaired = true;
+      }
+    }
+  }
+  if (stateRepaired) saveV12();
+
   let mainSortable = null;
   let meetingSortable = null;
   
@@ -647,7 +679,7 @@
 
     loadNoteBoxFor(taskId);
 
-    log.active = { taskId, startISO: nowISO(), startEpoch: Date.now() };
+    log.active = { taskId, startISO: nowISO(), startEpoch: Date.now(), lastTick: Date.now() };
     saveV12();
     updateHeaderAndTasks();
     el.noteBox.focus();
@@ -1327,6 +1359,12 @@
     }
   });
 
+  window.addEventListener("beforeunload", () => {
+    if(curLog().active){
+      stopActive();
+    }
+  });
+
   {
     const d = curLog();
     if(d.active && !d.active.startEpoch){
@@ -1336,16 +1374,24 @@
     }
   }
 
+  let lastTickSave = 0;
   function tick(){
     const d = curLog();
     if(d.active){
-      const ms = Date.now() - (d.active.startEpoch || Date.now());
+      const now = Date.now();
+      const ms = now - (d.active.startEpoch || now);
       const want = fmtHMS(ms);
 
       const uiTask = taskUI.get(d.active.taskId);
       if(uiTask){
         const wantTask = fmtHMS(taskMsForCurrentLog(d.active.taskId));
         if(uiTask.timeEl.textContent !== wantTask) uiTask.timeEl.textContent = wantTask;
+      }
+
+      if (now - lastTickSave > 5000) {
+        d.active.lastTick = now;
+        saveV12();
+        lastTickSave = now;
       }
     }
     if(logUI.has(state.currentDayId)){
