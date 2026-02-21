@@ -566,12 +566,13 @@
         d.active = null;
         stateRepaired = true;
       } else {
-        // Safe to resume, reset monotonic baseline
+        // FIX: Calculate the wall-clock gap to "catch up" the stale local storage time
+        const nowEpoch = Date.now();
+        const catchUpMs = Math.max(0, nowEpoch - (d.active.lastTick || nowEpoch));
+        
+        d.active.accumulatedMs = (d.active.accumulatedMs || 0) + catchUpMs;
         d.active.lastPerf = performance.now();
-        d.active.lastTick = Date.now();
-        if(!("accumulatedMs" in d.active)){
-            d.active.accumulatedMs = Math.max(0, Date.now() - (d.active.startEpoch || Date.now()));
-        }
+        d.active.lastTick = nowEpoch;
       }
     }
   }
@@ -583,13 +584,16 @@
           try {
               const parsed = JSON.parse(e.newValue);
               if (parsed && parsed.dayOrder && parsed.days) {
-                  // FIX: Rebase performance.now() for any running timers 
-                  // coming from another tab, otherwise the delta will explode.
+                  // FIX: Apply "catch-up" math to the incoming synced data as well
                   for (const logId of parsed.dayOrder) {
                       const d = parsed.days[logId];
                       if (d && d.active) {
+                          const nowEpoch = Date.now();
+                          const catchUpMs = Math.max(0, nowEpoch - (d.active.lastTick || nowEpoch));
+                          
+                          d.active.accumulatedMs = (d.active.accumulatedMs || 0) + catchUpMs;
                           d.active.lastPerf = performance.now();
-                          d.active.lastTick = Date.now();
+                          d.active.lastTick = nowEpoch;
                       }
                   }
 
@@ -1497,8 +1501,6 @@
     }
   });
 
-  // FIX: Don't call stopActive() here, as it will kill the timer
-  // in other open tabs. Just save the draft and final timestamp.
   window.addEventListener("beforeunload", () => {
       syncDraftFromUI();
       const d = curLog();
@@ -1515,16 +1517,13 @@
       const nowEpoch = Date.now();
       const nowPerf = performance.now();
 
-      // Check for OS sleep/suspend or massive throttle by looking at wall-clock delta
       const wallDelta = nowEpoch - (d.active.lastTick || nowEpoch);
       
       if (wallDelta > 15000) {
-          // If execution paused for >15s, auto-stop the timer at the last known valid tick
           stopActive(true);
           return;
       }
 
-      // Safe to accumulate monotonic time
       let delta = nowPerf - (d.active.lastPerf || nowPerf);
       if (delta < 0) delta = 250; 
       if (delta > 15000) delta = 15000; 
