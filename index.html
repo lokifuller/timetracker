@@ -530,20 +530,17 @@
 
   let state = loadState() || initState();
 
-  // Repair unclosed sessions and upgrade old state schema
   let stateRepaired = false;
   for (const logId of state.dayOrder) {
     const d = state.days[logId];
     if (d && d.active) {
       const last = d.active.lastTick || d.active.startEpoch || Date.now();
       
-      // If the timer crashed or slept > 15s, close it
       if (Date.now() - last > 15000) {
         const endEpoch = last;
         const startEpoch = d.active.startEpoch || endEpoch;
         let durMs = Math.floor(d.active.accumulatedMs || 0);
         
-        // Upgrade fallback for legacy sessions
         if(!("accumulatedMs" in d.active)) {
             durMs = Math.max(0, endEpoch - startEpoch);
         }
@@ -566,7 +563,6 @@
         d.active = null;
         stateRepaired = true;
       } else {
-        // FIX: Calculate the wall-clock gap to "catch up" the stale local storage time
         const nowEpoch = Date.now();
         const catchUpMs = Math.max(0, nowEpoch - (d.active.lastTick || nowEpoch));
         
@@ -578,13 +574,57 @@
   }
   if (stateRepaired) saveState();
 
+  // ----- FIX: Data Protection for Blocking Prompts -----
+  // When a prompt pauses the tab, other tabs keep running. 
+  // We MUST pull the newest data from localStorage right after the prompt ends.
+  function syncMemoryFromStorage() {
+      try {
+          const raw = localStorage.getItem(LS_KEY);
+          if (raw) {
+              const parsed = JSON.parse(raw);
+              if (parsed && parsed.dayOrder && parsed.days) {
+                  for (const logId of parsed.dayOrder) {
+                      const d = parsed.days[logId];
+                      if (d && d.active) {
+                          const nowEpoch = Date.now();
+                          const catchUpMs = Math.max(0, nowEpoch - (d.active.lastTick || nowEpoch));
+                          d.active.accumulatedMs = (d.active.accumulatedMs || 0) + catchUpMs;
+                          d.active.lastPerf = performance.now();
+                          d.active.lastTick = nowEpoch;
+                      }
+                  }
+                  state = parsed;
+                  reindexLogsState(state);
+              }
+          }
+      } catch(e) { console.error("Sync memory failed", e); }
+  }
+
+  function promptSafe(msg, defaultText) {
+      syncDraftFromUI();
+      clearTimeout(noteSaveT);
+      saveState(); 
+      const res = window.prompt(msg, defaultText); 
+      syncMemoryFromStorage(); // Pull background data instantly after unpausing
+      return res;
+  }
+
+  function confirmSafe(msg) {
+      syncDraftFromUI();
+      clearTimeout(noteSaveT);
+      saveState();
+      const res = window.confirm(msg);
+      syncMemoryFromStorage(); // Pull background data instantly after unpausing
+      return res;
+  }
+  // ---------------------------------------------------
+
   // Cross-Tab Sync
   window.addEventListener('storage', (e) => {
       if (e.key === LS_KEY && e.newValue) {
           try {
               const parsed = JSON.parse(e.newValue);
               if (parsed && parsed.dayOrder && parsed.days) {
-                  // FIX: Apply "catch-up" math to the incoming synced data as well
                   for (const logId of parsed.dayOrder) {
                       const d = parsed.days[logId];
                       if (d && d.active) {
@@ -713,7 +753,6 @@
     
     let durMs = Math.floor(log.active.accumulatedMs || 0);
 
-    // Apply the final trailing delta unless it was killed by a sleep repair
     if (!isSleepRepair) {
         const nowPerf = performance.now();
         let delta = nowPerf - (log.active.lastPerf || nowPerf);
@@ -812,26 +851,25 @@
   }
 
   function renameLog(logId) {
-    const d = ensureLog(logId);
-    const newLabel = prompt("Rename log:", d.label);
+    const currentLabel = state.days[logId] ? state.days[logId].label : "Log";
+    const newLabel = promptSafe("Rename log:", currentLabel);
     
     if (newLabel !== null && newLabel.trim() !== "") {
-      d.label = newLabel.trim();
-      saveState();
-      
-      if (logId === state.currentDayId) {
-        renderHeader();
-      }
-      
-      const ui = logUI.get(logId);
-      if (ui && ui.nameSpan) {
-        ui.nameSpan.textContent = d.label;
+      const freshLog = state.days[logId];
+      if (freshLog) {
+        freshLog.label = newLabel.trim();
+        saveState();
+        
+        if (logId === state.currentDayId) {
+          renderHeader();
+        }
+        renderLogAll();
       }
     }
   }
 
   function deleteLog(logId) {
-    if(!confirm("Are you sure you want to delete this log?")) return;
+    if(!confirmSafe("Are you sure you want to delete this log?")) return;
     
     if(state.currentDayId === logId && curLog().active) {
       toast("Stop the running timer before deleting this log.");
@@ -993,7 +1031,7 @@
         mGroupWrapper.querySelector("#btnAddMeeting").addEventListener("click", (e) => {
           e.preventDefault();
           e.stopPropagation();
-          const name = prompt("Enter meeting name (e.g., 'Daily Sync'):");
+          const name = promptSafe("Enter meeting name (e.g., 'Daily Sync'):");
           if(name && name.trim()){
             curLog().tasks.push({ id: uid(), name: name.trim(), isMeeting: true, isDeletable: true });
             saveState();
@@ -1070,7 +1108,7 @@
     const delBtn = row.querySelector('button[data-action="del"]');
     if(delBtn){
       delBtn.addEventListener("click", () => {
-        if(confirm(`Are you sure you want to permanently delete the timer "${t.name}"?`)){
+        if(confirmSafe(`Are you sure you want to permanently delete the timer "${t.name}"?`)){
           if(curLog().active && curLog().active.taskId === t.id){
             stopActive();
           }
@@ -1315,13 +1353,16 @@
       `;
 
       tr.querySelector("button[data-del]").addEventListener("click", () => {
-        if(!confirm("Are you sure you want to permanently delete this entry from the log?")) return; 
+        if(!confirmSafe("Are you sure you want to permanently delete this entry from the log?")) return; 
         
-        const idx = d.entries.findIndex(x => x.id === e.id);
+        const currentLog = state.days[logId];
+        if (!currentLog) return;
+        
+        const idx = currentLog.entries.findIndex(x => x.id === e.id);
         if(idx >= 0){
-          d.entries.splice(idx, 1);
+          currentLog.entries.splice(idx, 1);
           if(e.taskId){
-            d.totalsByTask[e.taskId] = Math.max(0, (d.totalsByTask[e.taskId]||0) - (e.durMs||0));
+            currentLog.totalsByTask[e.taskId] = Math.max(0, (currentLog.totalsByTask[e.taskId]||0) - (e.durMs||0));
           }
           saveState();
           refreshLog(logId);
@@ -1437,7 +1478,7 @@
   el.btnNewLog.addEventListener("click", () => {
     if(curLog().active) stopActive();
 
-    let name = prompt("Enter a name for the new log:");
+    let name = promptSafe("Enter a name for the new log:");
     if (name === null) return; 
 
     name = name.trim();
@@ -1481,7 +1522,7 @@
       toast("Stop the running timer first before clearing logs.");
       return;
     }
-    if(!confirm("Are you sure you want to clear all logs and reset completely?")) return;
+    if(!confirmSafe("Are you sure you want to clear all logs and reset completely?")) return;
     state = initState();
     saveState();
     loadNoteBoxFor(focusTaskId());
