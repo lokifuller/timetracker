@@ -9,7 +9,6 @@
 
   <style>
     :root {
-      /* Professional Light Theme */
       --bg: #f3f4f6; 
       --panel: #ffffff; 
       --border: #e5e7eb;
@@ -54,7 +53,6 @@
       letter-spacing: -0.01em;
     }
     
-    /* Layout */
     .row { 
       display: grid; 
       grid-template-columns: 1fr 1fr; 
@@ -101,7 +99,6 @@
     .muted { color: var(--muted); font-size: 13px; }
     .mono { font-family: var(--mono); }
     
-    /* Badges/Pills */
     .pill { 
       font-size: 12px; 
       border: 1px solid var(--border); 
@@ -131,7 +128,6 @@
       cursor: default;
     }
 
-    /* Form */
     textarea, input[type="text"] {
       border: 1px solid var(--border); 
       background: #ffffff; 
@@ -151,7 +147,6 @@
       box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
     }
 
-    /* Buttons */
     .btn {
       border: 1px solid var(--border); 
       background: #ffffff; 
@@ -190,11 +185,9 @@
     }
     .btn.ghost-bad:hover { background: #fef2f2; }
 
-    /* Utilities */
     .inline { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
     .split { display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
 
-    /* Timers / Tasks Grid */
     .tasks { 
       display: flex; 
       flex-direction: column;
@@ -209,6 +202,7 @@
       padding: 12px 16px;
       background: #ffffff;
       transition: border-color 0.2s, box-shadow 0.2s;
+      cursor: pointer;
     }
     .task.active { 
       border-color: var(--accent); 
@@ -233,7 +227,6 @@
     .tname { font-weight: 600; font-size: 14px; color: var(--text); pointer-events: none; }
     .ttime { font-family: var(--mono); font-weight: 600; font-size: 13px; color: var(--text); }
 
-    /* Meeting Accordion */
     details.meeting-group {
       border: 1px solid var(--border);
       border-radius: 8px;
@@ -249,7 +242,6 @@
     details.meeting-group summary::-webkit-details-marker { display: none; }
     details.meeting-group[open] summary { border-bottom: 1px solid var(--border); }
     
-    /* Menus */
     details.menu { position: relative; }
     details.menu summary {
       list-style: none; cursor: pointer; user-select: none;
@@ -272,14 +264,12 @@
     }
     .menuBox button:hover { background: #f3f4f6; }
 
-    /* Tables */
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
     th, td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
     th { color: var(--muted); font-weight: 600; text-transform: uppercase; font-size: 11px; letter-spacing: 0.05em; text-align: left; }
     .right { text-align: right; }
     .noteCell { white-space: pre-wrap; word-break: break-word; color: var(--text); max-width: 500px; }
 
-    /* Day-grouped log */
     .dayGroups { display: grid; gap: 12px; }
     details.dayGroup {
       border: 1px solid var(--border);
@@ -302,7 +292,6 @@
     .dayMeta { color: var(--muted); font-size: 12px; font-family: var(--mono); white-space: nowrap; }
     .dayInner { padding: 0; background: #ffffff; }
 
-    /* Toasts */
     .toast {
       position: fixed; left: 50%; transform: translateX(-50%);
       bottom: 24px; background: #1f2937; border: none;
@@ -503,7 +492,6 @@
         }
       }
       
-      // Auto-migrate from V11
       raw = localStorage.getItem(LS_V11);
       if(raw) {
         const s = JSON.parse(raw);
@@ -540,7 +528,6 @@
   function ensureLog(logId){
     let d = state.days[logId];
     
-    // Safety Fallback: if DayOrder got out of sync with Days dictionary
     if(!d){
       state.dayOrder = state.dayOrder.filter(id => id !== logId);
       const defaultTasks = DEFAULT_TASKS.map(name => ({ id: uid(), name, isMeeting: false, isDeletable: false }));
@@ -780,7 +767,6 @@
     return {start, end};
   }
 
-  // ----- Rendering Tasks & SortableJS -----
   const taskUI = new Map(); 
   
   function syncTaskOrder() {
@@ -806,7 +792,6 @@
 
   function renderTasks(){
     
-    // Explicitly unmount Sortable to prevent silent JavaScript thread crashes
     try {
         if (mainSortable) { mainSortable.destroy(); mainSortable = null; }
         if (meetingSortable) { meetingSortable.destroy(); meetingSortable = null; }
@@ -882,7 +867,6 @@
       }
     }
 
-    // Initialize fresh SortableJS
     if (typeof Sortable !== 'undefined') {
       mainSortable = new Sortable(el.taskListMain, {
         group: 'mainTasks',
@@ -928,6 +912,13 @@
         ${t.isDeletable ? `<button class="btn small ghost-bad" data-action="del" title="Delete Timer">✕</button>` : ''}
       </div>
     `;
+
+    row.addEventListener("click", (e) => {
+      if(!e.target.closest('button') && !e.target.closest('.drag-handle')){
+        syncDraftFromUI();
+        loadNoteBoxFor(t.id);
+      }
+    });
 
     const timeEl = row.querySelector('[data-time="1"]');
     const btn = row.querySelector('button[data-action="toggle"]');
@@ -1021,7 +1012,6 @@
     el.noteCount.textContent = String((el.noteBox.value || "").length);
   }
 
-  // ----- Log Panels -----
   const logUI = new Map(); 
 
   function updateLogCount(){
@@ -1032,7 +1022,6 @@
     el.logDays.innerHTML = "";
     logUI.clear();
 
-    // Iterate over cloned array just to be safe during DOM redraws
     for(const logId of [...state.dayOrder]){
       const node = buildLogDetails(logId);
       el.logDays.appendChild(node.details);
@@ -1194,7 +1183,6 @@
     }
   }
 
-  // ----- Export / Summary -----
   function exportCSV(filename, rows){
     const csv = rows.map(r => r.map(cell => {
       const s = String(cell ?? "");
@@ -1281,7 +1269,6 @@
       .replaceAll('"',"&quot;").replaceAll("'","&#039;");
   }
 
-  // ----- Events -----
   let noteSaveT = null;
   el.noteBox.addEventListener("input", () => {
     const tid = focusTaskId();
@@ -1294,7 +1281,6 @@
   el.btnNewLog.addEventListener("click", () => {
     if(curLog().active) stopActive();
 
-    // Pass the filtered tasks representing the "template" to the new log
     const prevTasks = curLog().tasks.filter(t => !t.isMeeting);
     const d = makeLog("Temp", prevTasks);
 
