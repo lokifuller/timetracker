@@ -292,6 +292,11 @@
     .dayMeta { color: var(--muted); font-size: 12px; font-family: var(--mono); white-space: nowrap; }
     .dayInner { padding: 0; background: #ffffff; }
 
+    .log-name-edit { cursor: pointer; border-bottom: 1px dashed transparent; transition: border-color 0.2s, opacity 0.2s; }
+    .log-name-edit:hover { opacity: 0.7; border-color: var(--text); }
+    #currentLogPill { cursor: pointer; transition: opacity 0.2s; }
+    #currentLogPill:hover { opacity: 0.8; }
+
     .toast {
       position: fixed; left: 50%; transform: translateX(-50%);
       bottom: 24px; background: #1f2937; border: none;
@@ -301,6 +306,7 @@
       z-index: 100;
     }
     .toast.show { display: block; animation: fadeup 0.2s ease-out forwards; }
+    .toast.error { background: #b91c1c; }
     
     @keyframes fadeup {
       from { opacity: 0; transform: translate(-50%, 10px); }
@@ -315,7 +321,7 @@
       <div class="inline">
         <h1>Timer</h1>
         <span class="pill" id="statusPill">Idle</span>
-        <span class="pill on mono" id="currentLogPill">Log 1</span>
+        <span class="pill on mono" id="currentLogPill" title="Click to rename active log">Log 1</span>
       </div>
       <div class="inline">
         <button class="btn" id="btnNewLog">+ New Log</button>
@@ -366,7 +372,7 @@
         <div class="bd">
           <textarea id="noteBox" placeholder="Enter details or notes for the active task here. Notes save automatically when switching tasks or stopping the timer..."></textarea>
           <div class="split muted" style="margin-top: 12px; font-size: 12px;">
-            <span>Notes are synced automatically.</span>
+            <span>Notes are saved locally to this browser.</span>
             <span class="mono">Characters: <span id="noteCount">0</span></span>
           </div>
         </div>
@@ -416,6 +422,10 @@
     toast: $("toast"),
   };
 
+  el.currentLogPill.addEventListener("click", () => {
+    renameLog(state.currentDayId);
+  });
+
   const pad2 = (n) => String(n).padStart(2,"0");
   const nowISO = () => new Date().toISOString();
   
@@ -437,11 +447,16 @@
   };
   const uid = () => Math.random().toString(16).slice(2) + "-" + Math.random().toString(16).slice(2);
 
-  const toast = (msg, ms=2500) => {
+  const toast = (msg, ms=2500, isError=false) => {
     el.toast.textContent = msg;
+    if(isError) el.toast.classList.add("error");
+    else el.toast.classList.remove("error");
     el.toast.classList.add("show");
     clearTimeout(toast._t);
-    toast._t = setTimeout(() => el.toast.classList.remove("show"), ms);
+    toast._t = setTimeout(() => {
+        el.toast.classList.remove("show");
+        el.toast.classList.remove("error");
+    }, ms);
   };
 
   const DEFAULT_TASKS = [
@@ -477,7 +492,14 @@
     };
   };
 
-  function saveState(){ try{ localStorage.setItem(LS_KEY, JSON.stringify(state)); }catch{} }
+  function saveState(){ 
+      try{ 
+          localStorage.setItem(LS_KEY, JSON.stringify(state)); 
+      }catch(e){
+          console.error("Storage failed:", e);
+          toast("Warning: Failed to save data locally. Storage may be full.", 5000, true);
+      } 
+  }
   
   function loadState(){
     try{
@@ -494,28 +516,38 @@
   }
 
   function reindexLogsState(s) {
-    if (s.dayOrder && s.days) {
-      const len = s.dayOrder.length;
-      for (let i = 0; i < len; i++) {
-        const id = s.dayOrder[i];
-        if (s.days[id]) {
-          s.days[id].label = `Log ${len - i}`;
-        }
+    if (!s || !Array.isArray(s.dayOrder) || !s.days || typeof s.days !== "object") return;
+    s.dayOrder = s.dayOrder.filter(id => s.days[id]);
+    for (const id of s.dayOrder) {
+      if (s.days[id] && !s.days[id].label) {
+        s.days[id].label = "Log";
       }
+    }
+    if (!s.dayOrder.includes(s.currentDayId)) {
+      s.currentDayId = s.dayOrder[0] || null;
     }
   }
 
   let state = loadState() || initState();
 
+  // Repair unclosed sessions and upgrade old state schema
   let stateRepaired = false;
   for (const logId of state.dayOrder) {
     const d = state.days[logId];
     if (d && d.active) {
       const last = d.active.lastTick || d.active.startEpoch || Date.now();
+      
+      // If the timer crashed or slept > 15s, close it
       if (Date.now() - last > 15000) {
         const endEpoch = last;
         const startEpoch = d.active.startEpoch || endEpoch;
-        const durMs = Math.max(0, endEpoch - startEpoch);
+        let durMs = Math.floor(d.active.accumulatedMs || 0);
+        
+        // Upgrade fallback for legacy sessions
+        if(!("accumulatedMs" in d.active)) {
+            durMs = Math.max(0, endEpoch - startEpoch);
+        }
+
         const task = d.tasks.find(t => t.id === d.active.taskId);
         
         d.entries.unshift({
@@ -533,17 +565,53 @@
         }
         d.active = null;
         stateRepaired = true;
+      } else {
+        // Safe to resume, reset monotonic baseline
+        d.active.lastPerf = performance.now();
+        d.active.lastTick = Date.now();
+        if(!("accumulatedMs" in d.active)){
+            d.active.accumulatedMs = Math.max(0, Date.now() - (d.active.startEpoch || Date.now()));
+        }
       }
     }
   }
   if (stateRepaired) saveState();
 
+  // Cross-Tab Sync
+  window.addEventListener('storage', (e) => {
+      if (e.key === LS_KEY && e.newValue) {
+          try {
+              const parsed = JSON.parse(e.newValue);
+              if (parsed) {
+                  state = parsed;
+                  reindexLogsState(state);
+                  renderTasks();
+                  renderLogAll();
+                  updateHeaderAndTasks();
+                  const tid = focusTaskId();
+                  if (tid && document.activeElement !== el.noteBox) {
+                      loadNoteBoxFor(tid);
+                  }
+              }
+          } catch (err) { console.error("Cross-tab sync failed:", err); }
+      }
+  });
+
+  // Background Visibility Sync
+  document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') {
+          syncDraftFromUI();
+          if (curLog().active) {
+              curLog().active.lastTick = Date.now();
+          }
+          saveState();
+      }
+  });
+
   let mainSortable = null;
   let meetingSortable = null;
   
-  function reindexLogs() {
-    reindexLogsState(state);
-  }
+  function reindexLogs() { reindexLogsState(state); }
 
   function ensureLog(logId){
     let d = state.days[logId];
@@ -620,7 +688,7 @@
     setDraft(tid, el.noteBox.value || "");
   }
 
-  function stopActive(){
+  function stopActive(isSleepRepair = false){
     const log = curLog();
     if(!log.active) return;
 
@@ -628,9 +696,17 @@
 
     const taskId = log.active.taskId;
     const task = taskById(taskId);
-    const endEpoch = Date.now();
-    const startEpoch = log.active.startEpoch || endEpoch;
-    const durMs = Math.max(0, endEpoch - startEpoch);
+    
+    let durMs = Math.floor(log.active.accumulatedMs || 0);
+
+    // Apply the final trailing delta unless it was killed by a sleep repair
+    if (!isSleepRepair) {
+        const nowPerf = performance.now();
+        let delta = nowPerf - (log.active.lastPerf || nowPerf);
+        if (delta < 0) delta = 0;
+        if (delta > 15000) delta = 15000;
+        durMs += Math.floor(delta);
+    }
 
     const entry = {
       id: uid(),
@@ -641,6 +717,10 @@
       durMs,
       note: (getDraft(taskId) || "").trim()
     };
+
+    if (isSleepRepair && log.active.lastTick) {
+        entry.endISO = new Date(log.active.lastTick).toISOString();
+    }
 
     log.entries.unshift(entry);
     if(entry.taskId){
@@ -655,6 +735,10 @@
     ensureLogDOM(log.id);
     refreshLog(log.id);
     loadNoteBoxFor(taskId);
+    
+    if (isSleepRepair) {
+        toast("Timer auto-stopped due to system sleep/inactivity.");
+    }
   }
 
   function startTask(taskId){
@@ -667,7 +751,14 @@
 
     loadNoteBoxFor(taskId);
 
-    log.active = { taskId, startISO: nowISO(), startEpoch: Date.now(), lastTick: Date.now() };
+    log.active = { 
+        taskId, 
+        startISO: nowISO(), 
+        startEpoch: Date.now(), 
+        lastTick: Date.now(), 
+        lastPerf: performance.now(),
+        accumulatedMs: 0
+    };
     saveState();
     updateHeaderAndTasks();
     el.noteBox.focus();
@@ -703,6 +794,25 @@
     
     if(prevId !== logId && logUI.has(prevId)) {
         refreshLogSummary(prevId);
+    }
+  }
+
+  function renameLog(logId) {
+    const d = ensureLog(logId);
+    const newLabel = prompt("Rename log:", d.label);
+    
+    if (newLabel !== null && newLabel.trim() !== "") {
+      d.label = newLabel.trim();
+      saveState();
+      
+      if (logId === state.currentDayId) {
+        renderHeader();
+      }
+      
+      const ui = logUI.get(logId);
+      if (ui && ui.nameSpan) {
+        ui.nameSpan.textContent = d.label;
+      }
     }
   }
 
@@ -750,7 +860,7 @@
     let total = 0;
     for(const ms of Object.values(d.totalsByTask || {})) total += (ms||0);
     if(d.active){
-      total += Math.max(0, Date.now() - (d.active.startEpoch || Date.now()));
+      total += Math.floor(d.active.accumulatedMs || 0);
     }
     return total;
   }
@@ -759,7 +869,7 @@
     const d = curLog();
     let ms = (d.totalsByTask && d.totalsByTask[taskId]) ? d.totalsByTask[taskId] : 0;
     if(d.active && d.active.taskId === taskId){
-      ms += Math.max(0, Date.now() - (d.active.startEpoch || Date.now()));
+      ms += Math.floor(d.active.accumulatedMs || 0);
     }
     return ms;
   }
@@ -811,7 +921,6 @@
   }
 
   function renderTasks(){
-    
     try {
         if (mainSortable) { mainSortable.destroy(); mainSortable = null; }
         if (meetingSortable) { meetingSortable.destroy(); meetingSortable = null; }
@@ -1085,7 +1194,7 @@
     details.innerHTML = `
       <summary>
         <div class="daySumLeft">
-          <span style="font-weight: 600; font-size: 14px; color: var(--text);">${escapeHtml(d.label || "Log")}</span>
+          <span class="log-name-edit" data-name="1" style="font-weight: 600; font-size: 14px; color: var(--text);" title="Click to rename">${escapeHtml(d.label || "Log")}</span>
           <button class="pill ${logId===state.currentDayId ? "on" : ""}" data-use="1" title="Set this as the active log">${logId===state.currentDayId ? "Current" : "Select"}</button>
         </div>
         <div class="daySumRight">
@@ -1118,6 +1227,13 @@
     const useBtn = details.querySelector('button[data-use="1"]');
     const deleteBtn = details.querySelector('button[data-delete="1"]');
     const tbody = details.querySelector('[data-body="1"]');
+    const nameSpan = details.querySelector('[data-name="1"]');
+
+    nameSpan.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation(); 
+      renameLog(logId);
+    });
 
     useBtn.addEventListener("click", (ev) => {
       ev.preventDefault();
@@ -1133,7 +1249,7 @@
       deleteLog(logId);
     });
 
-    return { details, totalEl, countEl, metaEl, useBtn, tbody };
+    return { details, totalEl, countEl, metaEl, useBtn, tbody, nameSpan };
   }
 
   function refreshLogSummary(logId){
@@ -1221,15 +1337,18 @@
 
   function exportEntriesCSV(){
     const d = curLog();
-    const rows = [["log","task","start_local","end_local","duration_hms","duration_seconds","note"]];
+    const rows = [["log","task","start_local","end_local","start_iso","end_iso","duration_hms","duration_seconds","duration_ms","note"]];
     for(const e of (d.entries || []).slice().reverse()){
       rows.push([
         d.label,
         e.taskName,
         fmtLocal(e.startISO),
         fmtLocal(e.endISO),
+        e.startISO || "",
+        e.endISO || "",
         fmtHMS(e.durMs||0),
-        Math.round((e.durMs||0)/1000),
+        Math.floor((e.durMs||0)/1000),
+        e.durMs || 0,
         e.note || ""
       ]);
     }
@@ -1237,7 +1356,7 @@
   }
 
   function exportTotalsCSV(){
-    const rows = [["log","log_start_local","log_end_local","task","total_hms","total_seconds"]];
+    const rows = [["log","log_start_local","log_end_local","log_start_iso","log_end_iso","task","total_hms","total_seconds","total_ms"]];
     const idsOldestFirst = state.dayOrder.slice().reverse();
 
     for(const logId of idsOldestFirst){
@@ -1254,9 +1373,12 @@
           d.label,
           fmtLocal(start),
           fmtLocal(end),
+          start || "",
+          end || "",
           taskName,
           fmtHMS(ms),
-          Math.round(ms/1000)
+          Math.floor(ms/1000),
+          ms
         ]);
       }
     }
@@ -1301,14 +1423,32 @@
   el.btnNewLog.addEventListener("click", () => {
     if(curLog().active) stopActive();
 
-    const prevTasks = curLog().tasks.filter(t => !t.isMeeting);
-    const d = makeLog("Temp", prevTasks);
+    let name = prompt("Enter a name for the new log:");
+    if (name === null) return; 
+
+    name = name.trim();
+    if (!name) {
+      toast("Log name is required.");
+      return;
+    }
+
+    const existingNames = new Set(
+      state.dayOrder
+        .map(id => state.days[id]?.label?.trim().toLowerCase())
+        .filter(Boolean)
+    );
+    if (existingNames.has(name.toLowerCase())) {
+      toast("A log with that name already exists. Choose a unique name.");
+      return;
+    }
+
+    const prevTasks = curLog().tasks.map(t => ({ ...t }));
+    const d = makeLog(name, prevTasks);
 
     state.days[d.id] = d;
     state.dayOrder.unshift(d.id);   
     state.currentDayId = d.id;
 
-    reindexLogs(); 
     saveState();
 
     loadNoteBoxFor(focusTaskId());
@@ -1353,22 +1493,30 @@
     }
   });
 
-  {
-    const d = curLog();
-    if(d.active && !d.active.startEpoch){
-      d.active.startEpoch = Date.now();
-      if(!d.active.startISO) d.active.startISO = nowISO();
-      saveState();
-    }
-  }
-
   let lastTickSave = 0;
   function tick(){
     const d = curLog();
     if(d.active){
-      const now = Date.now();
-      const ms = now - (d.active.startEpoch || now);
-      const want = fmtHMS(ms);
+      const nowEpoch = Date.now();
+      const nowPerf = performance.now();
+
+      // Check for OS sleep/suspend or massive throttle by looking at wall-clock delta
+      const wallDelta = nowEpoch - (d.active.lastTick || nowEpoch);
+      
+      if (wallDelta > 15000) {
+          // If execution paused for >15s, auto-stop the timer at the last known valid tick
+          stopActive(true);
+          return;
+      }
+
+      // Safe to accumulate monotonic time
+      let delta = nowPerf - (d.active.lastPerf || nowPerf);
+      if (delta < 0) delta = 250; 
+      if (delta > 15000) delta = 15000; 
+      
+      d.active.accumulatedMs = (d.active.accumulatedMs || 0) + delta;
+      d.active.lastPerf = nowPerf;
+      d.active.lastTick = nowEpoch;
 
       const uiTask = taskUI.get(d.active.taskId);
       if(uiTask){
@@ -1376,10 +1524,9 @@
         if(uiTask.timeEl.textContent !== wantTask) uiTask.timeEl.textContent = wantTask;
       }
 
-      if (now - lastTickSave > 5000) {
-        d.active.lastTick = now;
+      if (nowEpoch - lastTickSave > 5000) {
         saveState();
-        lastTickSave = now;
+        lastTickSave = nowEpoch;
       }
     }
     if(logUI.has(state.currentDayId)){
