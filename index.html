@@ -582,7 +582,17 @@
       if (e.key === LS_KEY && e.newValue) {
           try {
               const parsed = JSON.parse(e.newValue);
-              if (parsed) {
+              if (parsed && parsed.dayOrder && parsed.days) {
+                  // FIX: Rebase performance.now() for any running timers 
+                  // coming from another tab, otherwise the delta will explode.
+                  for (const logId of parsed.dayOrder) {
+                      const d = parsed.days[logId];
+                      if (d && d.active) {
+                          d.active.lastPerf = performance.now();
+                          d.active.lastTick = Date.now();
+                      }
+                  }
+
                   state = parsed;
                   reindexLogsState(state);
                   renderTasks();
@@ -1487,10 +1497,15 @@
     }
   });
 
+  // FIX: Don't call stopActive() here, as it will kill the timer
+  // in other open tabs. Just save the draft and final timestamp.
   window.addEventListener("beforeunload", () => {
-    if(curLog().active){
-      stopActive();
-    }
+      syncDraftFromUI();
+      const d = curLog();
+      if(d && d.active){
+          d.active.lastTick = Date.now();
+      }
+      saveState();
   });
 
   let lastTickSave = 0;
