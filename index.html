@@ -307,6 +307,28 @@
     }
     .toast.show { display: block; animation: fadeup 0.2s ease-out forwards; }
     .toast.error { background: #b91c1c; }
+
+    /* Custom Modal CSS */
+    .modal-overlay {
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(17, 24, 39, 0.5); backdrop-filter: blur(2px);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 9999; opacity: 0; transition: opacity 0.2s; pointer-events: none;
+    }
+    .modal-overlay.show { opacity: 1; pointer-events: auto; }
+    .modal-box {
+      background: #ffffff; border-radius: 12px; padding: 24px;
+      width: 100%; max-width: 400px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+      transform: scale(0.95); transition: transform 0.2s;
+    }
+    .modal-overlay.show .modal-box { transform: scale(1); }
+    .modal-msg { font-weight: 500; margin-bottom: 16px; color: var(--text); }
+    .modal-input {
+      width: 100%; border: 1px solid var(--border); padding: 10px 12px;
+      border-radius: 6px; margin-bottom: 20px; outline: none; font-family: var(--sans);
+    }
+    .modal-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1); }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 12px; }
     
     @keyframes fadeup {
       from { opacity: 0; transform: translate(-50%, 10px); }
@@ -315,6 +337,17 @@
   </style>
 </head>
 <body>
+  <div id="modalOverlay" class="modal-overlay">
+    <div class="modal-box">
+      <div id="modalMsg" class="modal-msg"></div>
+      <input type="text" id="modalInput" class="modal-input" />
+      <div class="modal-actions">
+         <button id="modalBtnCancel" class="btn">Cancel</button>
+         <button id="modalBtnOk" class="btn good">OK</button>
+      </div>
+    </div>
+  </div>
+
   <div class="wrap">
     
     <div class="topbar">
@@ -398,10 +431,55 @@
 
 <script>
 (() => {
-  const LS_KEY = "trackingtimer"; 
+  const LS_META_KEY = "trackingtimer_meta"; 
+  const LS_LOG_PREFIX = "trackingtimer_log_";
+  
   const $ = (id) => document.getElementById(id);
-
   const uid = () => Math.random().toString(16).slice(2) + "-" + Math.random().toString(16).slice(2);
+
+  // --- Async UI Modals (No Thread Blocking) ---
+  const modal = {
+      overlay: $("modalOverlay"),
+      msg: $("modalMsg"),
+      input: $("modalInput"),
+      btnCancel: $("modalBtnCancel"),
+      btnOk: $("modalBtnOk"),
+      show: function(msg, isPrompt, defaultText) {
+          return new Promise(resolve => {
+              this.msg.textContent = msg;
+              if (isPrompt) {
+                  this.input.style.display = "block";
+                  this.input.value = defaultText || "";
+              } else {
+                  this.input.style.display = "none";
+              }
+              this.overlay.classList.add("show");
+              if (isPrompt) setTimeout(() => this.input.focus(), 50);
+
+              const cleanup = () => {
+                  this.overlay.classList.remove("show");
+                  this.btnOk.onclick = null;
+                  this.btnCancel.onclick = null;
+                  this.input.onkeydown = null;
+              };
+
+              this.btnCancel.onclick = () => { cleanup(); resolve(null); };
+              this.btnOk.onclick = () => {
+                  const val = isPrompt ? this.input.value : true;
+                  cleanup();
+                  resolve(val);
+              };
+              if (isPrompt) {
+                  this.input.onkeydown = (e) => {
+                      if (e.key === "Enter") this.btnOk.click();
+                      if (e.key === "Escape") this.btnCancel.click();
+                  };
+              }
+          });
+      },
+      prompt: function(msg, def) { return this.show(msg, true, def); },
+      confirm: function(msg) { return this.show(msg, false); }
+  };
 
   // --- Tab Tracking Heartbeat System ---
   const TAB_ID = uid();
@@ -437,7 +515,7 @@
       return tabs.length;
   }
 
-  pingTab(); // Register this tab immediately on load
+  pingTab();
   // ---------------------------------------
 
   const el = {
@@ -461,20 +539,18 @@
     toast: $("toast"),
   };
 
-  el.currentLogPill.addEventListener("click", () => {
-    renameLog(state.currentDayId);
-  });
+  el.currentLogPill.addEventListener("click", () => renameLog(state.currentDayId));
 
   const pad2 = (n) => String(n).padStart(2,"0");
   const nowISO = () => new Date().toISOString();
   
   const fmtLocal = (iso) => {
     if(!iso) return "—";
-    try{
+    try {
       return new Date(iso).toLocaleString(undefined,{
         year:"numeric", month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit", second:"2-digit"
       });
-    }catch{ return "—"; }
+    } catch { return "—"; }
   };
   
   const fmtHMS = (ms) => {
@@ -518,73 +594,98 @@
     tasks: JSON.parse(JSON.stringify(tasks)) 
   });
 
-  const initState = () => {
-    const tasks = DEFAULT_TASKS.map(name => ({ id: uid(), name, isMeeting: false, isDeletable: false }));
-    tasks.push({ id: uid(), name: "Meetings Accordion", isMeetingGroup: true, isDeletable: false });
-    
-    const log1 = makeLog("Log 1", tasks);
-    return {
-      dayOrder: [log1.id],     
-      currentDayId: log1.id,
-      days: { [log1.id]: log1 }
-    };
-  };
+  // --- Storage Split Engine (No Giant JSON) ---
+  let state = { dayOrder: [], currentDayId: null, days: {} };
 
-  function saveState(){ 
-      try{ 
-          localStorage.setItem(LS_KEY, JSON.stringify(state)); 
-      }catch(e){
-          console.error("Storage failed:", e);
-          toast("Warning: Failed to save data locally. Storage may be full.", 5000, true);
-      } 
+  function saveMeta() {
+      try {
+          localStorage.setItem(LS_META_KEY, JSON.stringify({
+              dayOrder: state.dayOrder,
+              currentDayId: state.currentDayId
+          }));
+      } catch(e) { toast("Warning: Local storage full.", 5000, true); }
   }
-  
-  function loadState(){
-    try{
-      let raw = localStorage.getItem(LS_KEY);
-      if(raw) {
-        const s = JSON.parse(raw);
-        if(s) {
-          reindexLogsState(s);
-          return s;
-        }
+
+  function saveLog(logId) {
+      if (!state.days[logId]) return;
+      try {
+          localStorage.setItem(LS_LOG_PREFIX + logId, JSON.stringify(state.days[logId]));
+      } catch(e) { toast("Warning: Local storage full.", 5000, true); }
+  }
+
+  function loadState() {
+      try {
+          let metaRaw = localStorage.getItem(LS_META_KEY);
+          if (!metaRaw) return false;
+          let meta = JSON.parse(metaRaw);
+          
+          state.dayOrder = meta.dayOrder || [];
+          state.currentDayId = meta.currentDayId;
+          state.days = {};
+
+          let missing = false;
+          for (let i = state.dayOrder.length - 1; i >= 0; i--) {
+              const id = state.dayOrder[i];
+              const logRaw = localStorage.getItem(LS_LOG_PREFIX + id);
+              if (logRaw) {
+                  state.days[id] = JSON.parse(logRaw);
+              } else {
+                  state.dayOrder.splice(i, 1);
+                  missing = true;
+              }
+          }
+          if (missing) saveMeta();
+          
+          if (!state.dayOrder.includes(state.currentDayId)) {
+              state.currentDayId = state.dayOrder[0] || null;
+              saveMeta();
+          }
+          return state.dayOrder.length > 0;
+      } catch { return false; }
+  }
+
+  if (!loadState()) {
+      // Legacy Migration or First Load
+      const legacyRaw = localStorage.getItem("trackingtimer");
+      if (legacyRaw) {
+          try {
+              const legacy = JSON.parse(legacyRaw);
+              state.dayOrder = legacy.dayOrder || [];
+              state.currentDayId = legacy.currentDayId;
+              state.days = legacy.days || {};
+              saveMeta();
+              for (const id of state.dayOrder) saveLog(id);
+              localStorage.removeItem("trackingtimer");
+          } catch(e) {}
+      } else {
+          const tasks = DEFAULT_TASKS.map(n => ({ id: uid(), name: n, isMeeting: false, isDeletable: false }));
+          tasks.push({ id: uid(), name: "Meetings Accordion", isMeetingGroup: true, isDeletable: false });
+          const log1 = makeLog("Log 1", tasks);
+          state.dayOrder = [log1.id];
+          state.currentDayId = log1.id;
+          state.days[log1.id] = log1;
+          saveMeta();
+          saveLog(log1.id);
       }
-      return null;
-    }catch{ return null; }
   }
 
-  function reindexLogsState(s) {
-    if (!s || !Array.isArray(s.dayOrder) || !s.days || typeof s.days !== "object") return;
-    s.dayOrder = s.dayOrder.filter(id => s.days[id]);
-    for (const id of s.dayOrder) {
-      if (s.days[id] && !s.days[id].label) {
-        s.days[id].label = "Log";
-      }
-    }
-    if (!s.dayOrder.includes(s.currentDayId)) {
-      s.currentDayId = s.dayOrder[0] || null;
-    }
-  }
-
-  let state = loadState() || initState();
-
+  // --- Sleep/Crash Recovery & Clock Rebasing ---
   let stateRepaired = false;
   for (const logId of state.dayOrder) {
     const d = state.days[logId];
     if (d && d.active) {
-      const last = d.active.lastTick || d.active.startEpoch || Date.now();
+      const lastEpoch = d.active.lastTick || d.active.startEpoch || Date.now();
+      const lastPerf = d.active.lastPerf || performance.now();
+      const epochDrift = Date.now() - lastEpoch;
+      const perfDrift = performance.now() - lastPerf;
       
-      if (Date.now() - last > 15000) {
-        const endEpoch = last;
+      // Real sleep detection: if epoch drifted significantly more than perf, the OS slept.
+      if (epochDrift - perfDrift > 15000 || epochDrift > 86400000) {
+        const endEpoch = lastEpoch; 
         const startEpoch = d.active.startEpoch || endEpoch;
-        let durMs = Math.floor(d.active.accumulatedMs || 0);
-        
-        if(!("accumulatedMs" in d.active)) {
-            durMs = Math.max(0, endEpoch - startEpoch);
-        }
+        let durMs = Math.floor(d.active.accumulatedMs || Math.max(0, endEpoch - startEpoch));
 
         const task = d.tasks.find(t => t.id === d.active.taskId);
-        
         d.entries.unshift({
           id: uid(),
           taskId: d.active.taskId || "",
@@ -601,107 +702,79 @@
         d.active = null;
         stateRepaired = true;
       } else {
-        const nowEpoch = Date.now();
-        const catchUpMs = Math.max(0, nowEpoch - (d.active.lastTick || nowEpoch));
-        
+        // Normal resume, rebase perf clock
+        const catchUpMs = Math.max(0, epochDrift);
         d.active.accumulatedMs = (d.active.accumulatedMs || 0) + catchUpMs;
         d.active.lastPerf = performance.now();
-        d.active.lastTick = nowEpoch;
+        d.active.lastTick = Date.now();
         stateRepaired = true; 
       }
     }
   }
-  if (stateRepaired) saveState();
-
-  function syncMemoryFromStorage() {
-      try {
-          const raw = localStorage.getItem(LS_KEY);
-          if (raw) {
-              const parsed = JSON.parse(raw);
-              if (parsed && parsed.dayOrder && parsed.days) {
-                  for (const logId of parsed.dayOrder) {
-                      const d = parsed.days[logId];
-                      if (d && d.active) {
-                          const nowEpoch = Date.now();
-                          const catchUpMs = Math.max(0, nowEpoch - (d.active.lastTick || nowEpoch));
-                          d.active.accumulatedMs = (d.active.accumulatedMs || 0) + catchUpMs;
-                          d.active.lastPerf = performance.now();
-                          d.active.lastTick = nowEpoch;
-                      }
-                  }
-                  state = parsed;
-                  reindexLogsState(state);
-              }
-          }
-      } catch(e) { console.error("Sync memory failed", e); }
+  if (stateRepaired) {
+      for (const logId of state.dayOrder) saveLog(logId);
   }
 
-  function promptSafe(msg, defaultText) {
-      syncDraftFromUI();
-      clearTimeout(noteSaveT);
-      saveState(); 
-      const res = window.prompt(msg, defaultText); 
-      syncMemoryFromStorage(); 
-      return res;
-  }
-
-  function confirmSafe(msg) {
-      syncDraftFromUI();
-      clearTimeout(noteSaveT);
-      saveState();
-      const res = window.confirm(msg);
-      syncMemoryFromStorage(); 
-      return res;
-  }
-
-  // Cross-Tab Sync
+  // --- Differential Cross-Tab Sync ---
   window.addEventListener('storage', (e) => {
-      if (e.key === LS_KEY && e.newValue) {
+      if (e.key === LS_META_KEY && e.newValue) {
           try {
-              const parsed = JSON.parse(e.newValue);
-              if (parsed && parsed.dayOrder && parsed.days) {
-                  for (const logId of parsed.dayOrder) {
-                      const d = parsed.days[logId];
-                      if (d && d.active) {
-                          const nowEpoch = Date.now();
-                          const catchUpMs = Math.max(0, nowEpoch - (d.active.lastTick || nowEpoch));
-                          
-                          d.active.accumulatedMs = (d.active.accumulatedMs || 0) + catchUpMs;
-                          d.active.lastPerf = performance.now();
-                          d.active.lastTick = nowEpoch;
-                      }
-                  }
-
-                  state = parsed;
-                  reindexLogsState(state);
-                  renderTasks();
-                  renderLogAll();
-                  updateHeaderAndTasks();
+              const meta = JSON.parse(e.newValue);
+              state.dayOrder = meta.dayOrder;
+              state.currentDayId = meta.currentDayId;
+              renderLogAll();
+              updateHeaderAndTasks();
+          } catch(err) {}
+      } 
+      else if (e.key && e.key.startsWith(LS_LOG_PREFIX) && e.newValue) {
+          try {
+              const logId = e.key.replace(LS_LOG_PREFIX, "");
+              const parsedLog = JSON.parse(e.newValue);
+              
+              // Differential Sync: Protect local typing draft
+              if (logId === state.currentDayId && document.activeElement === el.noteBox) {
                   const tid = focusTaskId();
-                  if (tid && document.activeElement !== el.noteBox) {
-                      loadNoteBoxFor(tid);
+                  if (tid && state.days[logId]) {
+                      parsedLog.noteDraftByTask[tid] = state.days[logId].noteDraftByTask[tid];
                   }
               }
-          } catch (err) { console.error("Cross-tab sync failed:", err); }
+
+              // Rebase perf clock on incoming active timers
+              if (parsedLog.active) {
+                  const nowEpoch = Date.now();
+                  const catchUpMs = Math.max(0, nowEpoch - (parsedLog.active.lastTick || nowEpoch));
+                  parsedLog.active.accumulatedMs = (parsedLog.active.accumulatedMs || 0) + catchUpMs;
+                  parsedLog.active.lastPerf = performance.now();
+                  parsedLog.active.lastTick = nowEpoch;
+              }
+
+              state.days[logId] = parsedLog;
+              renderTasks();
+              renderLogAll();
+              updateHeaderAndTasks();
+              
+              const tid = focusTaskId();
+              if (tid && document.activeElement !== el.noteBox) {
+                  loadNoteBoxFor(tid);
+              }
+          } catch (err) {}
       }
   });
 
-  // Background Visibility Sync
+  // Background Visibility Checkpoint
   document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'hidden') {
           syncDraftFromUI();
           if (curLog().active) {
               curLog().active.lastTick = Date.now();
           }
-          saveState();
+          saveLog(state.currentDayId);
       }
   });
 
   let mainSortable = null;
   let meetingSortable = null;
   
-  function reindexLogs() { reindexLogsState(state); }
-
   function ensureLog(logId){
     let d = state.days[logId];
     
@@ -714,7 +787,8 @@
       state.days[d.id] = d;
       state.dayOrder.unshift(d.id);
       if(state.currentDayId === logId) state.currentDayId = d.id;
-      reindexLogs();
+      saveMeta();
+      saveLog(d.id);
     }
     
     if(!("noteDraftByTask" in d)) d.noteDraftByTask = {};
@@ -777,7 +851,7 @@
     setDraft(tid, el.noteBox.value || "");
   }
 
-  function stopActive(isSleepRepair = false){
+  function stopActive(isSleepRepair = false, hardEndISO = null){
     const log = curLog();
     if(!log.active) return;
 
@@ -801,14 +875,10 @@
       taskId: task?.id || "",
       taskName: task?.name || "Unknown",
       startISO: log.active.startISO || nowISO(),
-      endISO: nowISO(),
+      endISO: hardEndISO || nowISO(),
       durMs,
       note: (getDraft(taskId) || "").trim()
     };
-
-    if (isSleepRepair && log.active.lastTick) {
-        entry.endISO = new Date(log.active.lastTick).toISOString();
-    }
 
     log.entries.unshift(entry);
     if(entry.taskId){
@@ -818,14 +888,14 @@
     log.active = null;
     setFocusTaskId(taskId);
 
-    saveState();
+    saveLog(log.id);
     updateHeaderAndTasks();
     ensureLogDOM(log.id);
     refreshLog(log.id);
     loadNoteBoxFor(taskId);
     
     if (isSleepRepair) {
-        toast("Timer auto-stopped due to system sleep/inactivity.");
+        toast("Timer auto-stopped due to system sleep.");
     }
   }
 
@@ -847,7 +917,7 @@
         lastPerf: performance.now(),
         accumulatedMs: 0
     };
-    saveState();
+    saveLog(log.id);
     updateHeaderAndTasks();
     el.noteBox.focus();
   }
@@ -876,7 +946,7 @@
     const tid = (d.active && d.active.taskId) ? d.active.taskId : (d.focusTaskId || (d.tasks.length ? d.tasks[0].id : ""));
     loadNoteBoxFor(tid);
 
-    saveState();
+    saveMeta();
     renderTasks();
     updateHeaderAndTasks();
     
@@ -885,26 +955,24 @@
     }
   }
 
-  function renameLog(logId) {
+  async function renameLog(logId) {
     const currentLabel = state.days[logId] ? state.days[logId].label : "Log";
-    const newLabel = promptSafe("Rename log:", currentLabel);
+    const newLabel = await modal.prompt("Rename log:", currentLabel);
     
     if (newLabel !== null && newLabel.trim() !== "") {
       const freshLog = state.days[logId];
       if (freshLog) {
         freshLog.label = newLabel.trim();
-        saveState();
-        
-        if (logId === state.currentDayId) {
-          renderHeader();
-        }
+        saveLog(logId);
+        if (logId === state.currentDayId) renderHeader();
         renderLogAll();
       }
     }
   }
 
-  function deleteLog(logId) {
-    if(!confirmSafe("Are you sure you want to delete this log?")) return;
+  async function deleteLog(logId) {
+    const isConfirmed = await modal.confirm("Are you sure you want to delete this log?");
+    if(!isConfirmed) return;
     
     if(state.currentDayId === logId && curLog().active) {
       toast("Stop the running timer before deleting this log.");
@@ -913,6 +981,7 @@
 
     state.dayOrder = state.dayOrder.filter(id => id !== logId);
     delete state.days[logId];
+    localStorage.removeItem(LS_LOG_PREFIX + logId);
 
     if (state.currentDayId === logId) {
       if (state.dayOrder.length > 0) {
@@ -925,11 +994,11 @@
         state.days[newLog.id] = newLog;
         state.dayOrder.unshift(newLog.id);
         state.currentDayId = newLog.id;
+        saveLog(newLog.id);
       }
     }
 
-    reindexLogs(); 
-    saveState();
+    saveMeta();
     
     const newCurrent = curLog();
     const tid = (newCurrent.active && newCurrent.active.taskId) ? newCurrent.active.taskId : (newCurrent.focusTaskId || (newCurrent.tasks.length ? newCurrent.tasks[0].id : ""));
@@ -938,7 +1007,6 @@
     renderTasks();
     renderLogAll();
     updateHeaderAndTasks();
-    
     toast("Log deleted.");
   }
 
@@ -1003,7 +1071,7 @@
     
     const taskMap = new Map(curLog().tasks.map(t => [t.id, t]));
     curLog().tasks = newOrder.map(id => taskMap.get(id)).filter(Boolean);
-    saveState();
+    saveLog(state.currentDayId);
     renderTasks();
   }
 
@@ -1063,13 +1131,13 @@
           }
         }
 
-        mGroupWrapper.querySelector("#btnAddMeeting").addEventListener("click", (e) => {
+        mGroupWrapper.querySelector("#btnAddMeeting").addEventListener("click", async (e) => {
           e.preventDefault();
           e.stopPropagation();
-          const name = promptSafe("Enter meeting name (e.g., 'Daily Sync'):");
+          const name = await modal.prompt("Enter meeting name (e.g., 'Daily Sync'):");
           if(name && name.trim()){
             curLog().tasks.push({ id: uid(), name: name.trim(), isMeeting: true, isDeletable: true });
-            saveState();
+            saveLog(state.currentDayId);
             renderTasks();
             updateAllTaskRows();
             document.getElementById("meetingGroup").open = true;
@@ -1142,13 +1210,14 @@
 
     const delBtn = row.querySelector('button[data-action="del"]');
     if(delBtn){
-      delBtn.addEventListener("click", () => {
-        if(confirmSafe(`Are you sure you want to permanently delete the timer "${t.name}"?`)){
+      delBtn.addEventListener("click", async () => {
+        const isConfirmed = await modal.confirm(`Are you sure you want to delete the timer "${t.name}"?`);
+        if(isConfirmed){
           if(curLog().active && curLog().active.taskId === t.id){
             stopActive();
           }
           curLog().tasks = curLog().tasks.filter(x => x.id !== t.id);
-          saveState();
+          saveLog(state.currentDayId);
           renderTasks();
           updateAllTaskRows();
         }
@@ -1165,7 +1234,7 @@
       const newTask = { id: uid(), name: name, isMeeting: false, isDeletable: true };
       curLog().tasks.push(newTask); 
       
-      saveState();
+      saveLog(state.currentDayId);
       renderTasks();
       updateAllTaskRows();
       el.newTimerInput.value = ""; 
@@ -1387,8 +1456,9 @@
         <td class="right"><button class="btn small ghost-bad" data-del="${escapeHtml(e.id)}">✕</button></td>
       `;
 
-      tr.querySelector("button[data-del]").addEventListener("click", () => {
-        if(!confirmSafe("Are you sure you want to permanently delete this entry from the log?")) return; 
+      tr.querySelector("button[data-del]").addEventListener("click", async () => {
+        const isConfirmed = await modal.confirm("Are you sure you want to permanently delete this entry from the log?");
+        if(!isConfirmed) return; 
         
         const currentLog = state.days[logId];
         if (!currentLog) return;
@@ -1399,7 +1469,7 @@
           if(e.taskId){
             currentLog.totalsByTask[e.taskId] = Math.max(0, (currentLog.totalsByTask[e.taskId]||0) - (e.durMs||0));
           }
-          saveState();
+          saveLog(logId);
           refreshLog(logId);
           if(logId === state.currentDayId) updateAllTaskRows();
         }
@@ -1507,13 +1577,13 @@
     if(tid) setDraft(tid, el.noteBox.value || "");
     updateNoteCount();
     clearTimeout(noteSaveT);
-    noteSaveT = setTimeout(saveState, 350);
+    noteSaveT = setTimeout(() => saveLog(state.currentDayId), 600); // Throttled typing save
   });
 
-  el.btnNewLog.addEventListener("click", () => {
+  el.btnNewLog.addEventListener("click", async () => {
     if(curLog().active) stopActive();
 
-    let name = promptSafe("Enter a name for the new log:");
+    let name = await modal.prompt("Enter a name for the new log:");
     if (name === null) return; 
 
     name = name.trim();
@@ -1539,7 +1609,8 @@
     state.dayOrder.unshift(d.id);   
     state.currentDayId = d.id;
 
-    saveState();
+    saveMeta();
+    saveLog(d.id);
 
     loadNoteBoxFor(focusTaskId());
     renderTasks();
@@ -1552,14 +1623,24 @@
   el.btnExportTotals.addEventListener("click", () => { exportTotalsCSV(); el.exportMenu.open=false; });
   el.btnCopySummary.addEventListener("click", () => { copySummary(); el.exportMenu.open=false; });
 
-  el.btnClearAll.addEventListener("click", () => {
+  el.btnClearAll.addEventListener("click", async () => {
     if(curLog().active){
       toast("Stop the running timer first before clearing logs.");
       return;
     }
-    if(!confirmSafe("Are you sure you want to clear all logs and reset completely?")) return;
-    state = initState();
-    saveState();
+    const isConfirmed = await modal.confirm("Are you sure you want to clear all logs and reset completely?");
+    if(!isConfirmed) return;
+    
+    // Wipe all tracking timer keys
+    Object.keys(localStorage).forEach(key => {
+        if(key.startsWith(LS_META_KEY) || key.startsWith(LS_LOG_PREFIX)) {
+            localStorage.removeItem(key);
+        }
+    });
+
+    state = { dayOrder: [], currentDayId: null, days: {} };
+    ensureLog(uid()); // Forces init via ensureLog
+    
     loadNoteBoxFor(focusTaskId());
     renderTasks();
     renderLogAll();
@@ -1586,10 +1667,10 @@
       
       const remainingTabs = removeTab();
       if (remainingTabs === 0 && d && d.active) {
-          // It's the last tab! Force a hard stop of the timer.
+          // Last tab closed on desktop -> stop timer securely
           stopActive(false);
       } else {
-          saveState();
+          saveLog(state.currentDayId);
       }
   });
 
@@ -1600,16 +1681,17 @@
       const nowEpoch = Date.now();
       const nowPerf = performance.now();
 
-      const wallDelta = nowEpoch - (d.active.lastTick || nowEpoch);
+      const epochDelta = nowEpoch - (d.active.lastTick || nowEpoch);
+      const perfDelta = nowPerf - (d.active.lastPerf || nowPerf);
       
-      if (wallDelta > 15000) {
-          stopActive(true);
+      // True Sleep Detection: Ignores background throttling.
+      if (epochDelta - perfDelta > 15000 || epochDelta > 86400000) {
+          stopActive(true, new Date(d.active.lastTick).toISOString());
           return;
       }
 
       let delta = nowPerf - (d.active.lastPerf || nowPerf);
       if (delta < 0) delta = 250; 
-      if (delta > 15000) delta = 15000; 
       
       d.active.accumulatedMs = (d.active.accumulatedMs || 0) + delta;
       d.active.lastPerf = nowPerf;
@@ -1621,9 +1703,10 @@
         if(uiTask.timeEl.textContent !== wantTask) uiTask.timeEl.textContent = wantTask;
       }
 
-      if (nowEpoch - lastTickSave > 5000) {
-        saveState();
-        pingTab(); // Let the system know this tab is still alive
+      // Save chunked data every 10 seconds
+      if (nowEpoch - lastTickSave > 10000) {
+        saveLog(state.currentDayId);
+        pingTab();
         lastTickSave = nowEpoch;
       }
     }
