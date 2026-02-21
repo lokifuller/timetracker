@@ -1638,8 +1638,9 @@
         }
     });
 
-    state = { dayOrder: [], currentDayId: null, days: {} };
-    ensureLog(uid()); // Forces init via ensureLog
+	const resetId = uid();
+	state = { dayOrder: [], currentDayId: resetId, days: {} };
+	ensureLog(resetId); // Forces init via ensureLog
     
     loadNoteBoxFor(focusTaskId());
     renderTasks();
