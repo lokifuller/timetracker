@@ -401,6 +401,45 @@
   const LS_KEY = "trackingtimer"; 
   const $ = (id) => document.getElementById(id);
 
+  const uid = () => Math.random().toString(16).slice(2) + "-" + Math.random().toString(16).slice(2);
+
+  // --- Tab Tracking Heartbeat System ---
+  const TAB_ID = uid();
+
+  function cleanAndGetTabs() {
+      try {
+          const raw = localStorage.getItem('timer_open_tabs');
+          let tabs = raw ? JSON.parse(raw) : [];
+          const now = Date.now();
+          tabs = tabs.filter(id => {
+              if (id === TAB_ID) return true;
+              const hb = parseInt(localStorage.getItem('timer_hb_' + id) || '0', 10);
+              return (now - hb) < 15000; 
+          });
+          return tabs;
+      } catch { return [TAB_ID]; }
+  }
+
+  function pingTab() {
+      localStorage.setItem('timer_hb_' + TAB_ID, Date.now().toString());
+      let tabs = cleanAndGetTabs();
+      if (!tabs.includes(TAB_ID)) {
+          tabs.push(TAB_ID);
+          localStorage.setItem('timer_open_tabs', JSON.stringify(tabs));
+      }
+  }
+
+  function removeTab() {
+      let tabs = cleanAndGetTabs();
+      tabs = tabs.filter(id => id !== TAB_ID);
+      localStorage.setItem('timer_open_tabs', JSON.stringify(tabs));
+      localStorage.removeItem('timer_hb_' + TAB_ID);
+      return tabs.length;
+  }
+
+  pingTab(); // Register this tab immediately on load
+  // ---------------------------------------
+
   const el = {
     statusPill: $("statusPill"),
     currentLogPill: $("currentLogPill"),
@@ -445,7 +484,6 @@
     const ss = s%60;
     return `${pad2(hh)}:${pad2(mm)}:${pad2(ss)}`;
   };
-  const uid = () => Math.random().toString(16).slice(2) + "-" + Math.random().toString(16).slice(2);
 
   const toast = (msg, ms=2500, isError=false) => {
     el.toast.textContent = msg;
@@ -557,7 +595,7 @@
           note: (d.noteDraftByTask[d.active.taskId] || "").trim()
         });
         
-        if (d.active.taskId) {
+        if (d.active.taskId && d.totalsByTask) {
           d.totalsByTask[d.active.taskId] = (d.totalsByTask[d.active.taskId] || 0) + durMs;
         }
         d.active = null;
@@ -569,14 +607,12 @@
         d.active.accumulatedMs = (d.active.accumulatedMs || 0) + catchUpMs;
         d.active.lastPerf = performance.now();
         d.active.lastTick = nowEpoch;
+        stateRepaired = true; 
       }
     }
   }
   if (stateRepaired) saveState();
 
-  // ----- FIX: Data Protection for Blocking Prompts -----
-  // When a prompt pauses the tab, other tabs keep running. 
-  // We MUST pull the newest data from localStorage right after the prompt ends.
   function syncMemoryFromStorage() {
       try {
           const raw = localStorage.getItem(LS_KEY);
@@ -605,7 +641,7 @@
       clearTimeout(noteSaveT);
       saveState(); 
       const res = window.prompt(msg, defaultText); 
-      syncMemoryFromStorage(); // Pull background data instantly after unpausing
+      syncMemoryFromStorage(); 
       return res;
   }
 
@@ -614,10 +650,9 @@
       clearTimeout(noteSaveT);
       saveState();
       const res = window.confirm(msg);
-      syncMemoryFromStorage(); // Pull background data instantly after unpausing
+      syncMemoryFromStorage(); 
       return res;
   }
-  // ---------------------------------------------------
 
   // Cross-Tab Sync
   window.addEventListener('storage', (e) => {
@@ -1548,7 +1583,14 @@
       if(d && d.active){
           d.active.lastTick = Date.now();
       }
-      saveState();
+      
+      const remainingTabs = removeTab();
+      if (remainingTabs === 0 && d && d.active) {
+          // It's the last tab! Force a hard stop of the timer.
+          stopActive(false);
+      } else {
+          saveState();
+      }
   });
 
   let lastTickSave = 0;
@@ -1581,6 +1623,7 @@
 
       if (nowEpoch - lastTickSave > 5000) {
         saveState();
+        pingTab(); // Let the system know this tab is still alive
         lastTickSave = nowEpoch;
       }
     }
