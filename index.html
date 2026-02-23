@@ -1602,8 +1602,14 @@
       return;
     }
 
-    const prevTasks = curLog().tasks.map(t => ({ ...t }));
-    const d = makeLog(name, prevTasks);
+	const prevTasks = curLog().tasks.map(t => {
+	  const taskCopy = { ...t };
+	  if (taskCopy.name === "Slack Reading + Correspondance") {
+		taskCopy.name = "Slack Correspondance"; 
+	  }
+	  return taskCopy;
+	});
+	const d = makeLog(name, prevTasks);
 
     state.days[d.id] = d;
     state.dayOrder.unshift(d.id);   
