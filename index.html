@@ -1197,14 +1197,14 @@ function createTaskDOM(t){
       </div>
     `;
 
-    row.addEventListener("click", (e) => {
+	row.addEventListener("click", (e) => {
       if(!e.target.closest('button') && !e.target.closest('.drag-handle') && !e.target.closest('.tname')){
         syncDraftFromUI();
         loadNoteBoxFor(t.id);
       }
     });
 
-    const nameEl = row.querySelector('.tname');
+	const nameEl = row.querySelector('.tname');
     nameEl.addEventListener("click", async (e) => {
       e.stopPropagation(); // Stops the row from being clicked
       const newName = await modal.prompt("Rename timer:", t.name);
@@ -1214,37 +1214,6 @@ function createTaskDOM(t){
         saveLog(state.currentDayId);
         renderTasks();
         updateHeaderAndTasks();
-      }
-    });
-
-    const timeEl = row.querySelector('[data-time="1"]');
-    const btn = row.querySelector('button[data-action="toggle"]');
-    btn.addEventListener("click", () => toggleTask(t.id));
-
-    const delBtn = row.querySelector('button[data-action="del"]');
-    if(delBtn){
-      delBtn.addEventListener("click", async () => {
-        const isConfirmed = await modal.confirm(`Are you sure you want to delete the timer "${t.name}"?`);
-        if(isConfirmed){
-          if(curLog().active && curLog().active.taskId === t.id){
-            stopActive();
-          }
-          curLog().tasks = curLog().tasks.filter(x => x.id !== t.id);
-          saveLog(state.currentDayId);
-          renderTasks();
-          updateAllTaskRows();
-        }
-      });
-    }
-
-    taskUI.set(t.id, { row, timeEl, btn });
-    return row;
-  }
-
-    row.addEventListener("click", (e) => {
-      if(!e.target.closest('button') && !e.target.closest('.drag-handle')){
-        syncDraftFromUI();
-        loadNoteBoxFor(t.id);
       }
     });
 
